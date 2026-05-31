@@ -66,7 +66,7 @@ enum class CheckKind {
   /// \brief Check for an invalid shift count
   ShiftCount,
 
-  _BeginIntOverflow,
+  BeginIntOverflow,
 
   /// \brief Check for an underflow on a signed integer operation
   SignedIntUnderflow,
@@ -80,7 +80,7 @@ enum class CheckKind {
   /// \brief Check for an overflow on an unsigned integer operation
   UnsignedIntOverflow,
 
-  _EndIntOverflow,
+  EndIntOverflow,
 
   /// \brief Check for a memory access on a null pointer
   NullPointerDereference,
@@ -108,7 +108,7 @@ enum class CheckKind {
   /// \brief Check for the alignment of a pointer on a memory access
   UnalignedPointer,
 
-  _BeginBufferOverflow,
+  BeginBufferOverflow,
 
   /// \brief Check for a call to gets()
   BufferOverflowGets,
@@ -116,9 +116,9 @@ enum class CheckKind {
   /// \brief Check for a buffer overflow
   BufferOverflow,
 
-  _EndBufferOverflow,
+  EndBufferOverflow,
 
-  _BeginSoundness,
+  BeginSoundness,
 
   /// \brief Ignored memory store on an unknown pointer
   IgnoredStore,
@@ -144,9 +144,9 @@ enum class CheckKind {
   /// \brief Check for a recursive function call
   RecursiveFunctionCall,
 
-  _EndSoundness,
+  EndSoundness,
 
-  _BeginFunctionCall,
+  BeginFunctionCall,
 
   /// \brief Check for a function call to inline assembly
   FunctionCallInlineAssembly,
@@ -157,7 +157,7 @@ enum class CheckKind {
   /// \brief Check a function call
   FunctionCall,
 
-  _EndFunctionCall,
+  EndFunctionCall,
 
   /// \brief Check for a memory deallocation (e.g, free)
   Free,

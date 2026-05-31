@@ -71,19 +71,19 @@ class Type {
 public:
   enum TypeKind {
     VoidKind,
-    _BeginScalarKind,
+    BeginScalarKind,
     IntegerKind,
     FloatKind,
     PointerKind,
-    _EndScalarKind,
-    _BeginAggregateKind,
+    EndScalarKind,
+    BeginAggregateKind,
     StructKind,
-    _BeginSequentialKind,
+    BeginSequentialKind,
     ArrayKind,
     VectorKind,
-    _EndSequentialKind,
+    EndSequentialKind,
     OpaqueKind,
-    _EndAggregateKind,
+    EndAggregateKind,
     FunctionKind
   };
 
@@ -123,7 +123,7 @@ public:
 
   /// \brief Is it a scalar type?
   bool is_scalar() const {
-    return this->_kind >= _BeginScalarKind && this->_kind <= _EndScalarKind;
+    return this->_kind >= BeginScalarKind && this->_kind <= EndScalarKind;
   }
 
   /// \brief Is it an integer type?
@@ -143,8 +143,8 @@ public:
 
   /// \brief Is it an aggregate type?
   bool is_aggregate() const {
-    return this->_kind >= _BeginAggregateKind &&
-           this->_kind <= _EndAggregateKind;
+    return this->_kind >= BeginAggregateKind &&
+           this->_kind <= EndAggregateKind;
   }
 
   /// \brief Is it a structure type?
@@ -152,8 +152,8 @@ public:
 
   /// \brief Is it a sequential type?
   bool is_sequential() const {
-    return this->_kind >= _BeginSequentialKind &&
-           this->_kind <= _EndSequentialKind;
+    return this->_kind >= BeginSequentialKind &&
+           this->_kind <= EndSequentialKind;
   }
 
   /// \brief Is it an array type?
@@ -220,7 +220,7 @@ protected:
 public:
   /// \brief Method for type support (isa, cast, dyn_cast)
   static bool classof(const Type* t) {
-    return t->kind() >= _BeginScalarKind && t->kind() <= _EndScalarKind;
+    return t->kind() >= BeginScalarKind && t->kind() <= EndScalarKind;
   }
 
 }; // end class ScalarType
@@ -379,7 +379,7 @@ protected:
 public:
   /// \brief Method for type support (isa, cast, dyn_cast)
   static bool classof(const Type* t) {
-    return t->kind() >= _BeginAggregateKind && t->kind() <= _EndAggregateKind;
+    return t->kind() >= BeginAggregateKind && t->kind() <= EndAggregateKind;
   }
 
 }; // end class AggregateType
@@ -499,7 +499,7 @@ public:
 
   /// \brief Method for type support (isa, cast, dyn_cast)
   static bool classof(const Type* t) {
-    return t->kind() >= _BeginSequentialKind && t->kind() <= _EndSequentialKind;
+    return t->kind() >= BeginSequentialKind && t->kind() <= EndSequentialKind;
   }
 
 }; // end class SequentialType

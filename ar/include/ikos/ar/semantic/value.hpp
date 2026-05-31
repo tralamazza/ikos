@@ -72,25 +72,25 @@ class Function;
 class Value {
 public:
   enum ValueKind {
-    _BeginConstantKind,
+    BeginConstantKind,
     UndefinedConstantKind,
     IntegerConstantKind,
     FloatConstantKind,
     NullConstantKind,
     StructConstantKind,
-    _BeginSequentialConstantKind,
+    BeginSequentialConstantKind,
     ArrayConstantKind,
     VectorConstantKind,
-    _EndSequentialConstantKind,
+    EndSequentialConstantKind,
     AggregateZeroConstantKind,
     FunctionPointerConstantKind,
     InlineAssemblyConstantKind,
-    _EndConstantKind,
-    _BeginVariableKind,
+    EndConstantKind,
+    BeginVariableKind,
     GlobalVariableKind,
     LocalVariableKind,
     InternalVariableKind,
-    _EndVariableKind
+    EndVariableKind
   };
 
 protected:
@@ -132,7 +132,7 @@ public:
 public:
   /// \brief Is it a constant?
   bool is_constant() const {
-    return this->_kind >= _BeginConstantKind && this->_kind <= _EndConstantKind;
+    return this->_kind >= BeginConstantKind && this->_kind <= EndConstantKind;
   }
 
   /// \brief Is it an undefined constant?
@@ -156,8 +156,8 @@ public:
 
   /// \brief Is it a sequential constant?
   bool is_sequential_constant() const {
-    return this->_kind >= _BeginSequentialConstantKind &&
-           this->_kind <= _EndSequentialConstantKind;
+    return this->_kind >= BeginSequentialConstantKind &&
+           this->_kind <= EndSequentialConstantKind;
   }
 
   /// \brief Is it a constant array?
@@ -183,7 +183,7 @@ public:
 
   /// \brief Is it a variable?
   bool is_variable() const {
-    return this->_kind >= _BeginVariableKind && this->_kind <= _EndVariableKind;
+    return this->_kind >= BeginVariableKind && this->_kind <= EndVariableKind;
   }
 
   /// \brief Is it a global variable?
@@ -214,7 +214,7 @@ protected:
 public:
   /// \brief Method for type support (isa, cast, dyn_cast)
   static bool classof(const Value* v) {
-    return v->kind() >= _BeginConstantKind && v->kind() <= _EndConstantKind;
+    return v->kind() >= BeginConstantKind && v->kind() <= EndConstantKind;
   }
 
 }; // end class Constant
@@ -459,8 +459,8 @@ public:
 
   /// \brief Method for type support (isa, cast, dyn_cast)
   static bool classof(const Value* v) {
-    return v->kind() >= _BeginSequentialConstantKind &&
-           v->kind() <= _EndSequentialConstantKind;
+    return v->kind() >= BeginSequentialConstantKind &&
+           v->kind() <= EndSequentialConstantKind;
   }
 
 }; // end class SequentialConstant
@@ -643,7 +643,7 @@ public:
 
   /// \brief Method for type support (isa, cast, dyn_cast)
   static bool classof(const Value* v) {
-    return v->kind() >= _BeginVariableKind && v->kind() <= _EndVariableKind;
+    return v->kind() >= BeginVariableKind && v->kind() <= EndVariableKind;
   }
 
 }; // end class Variable

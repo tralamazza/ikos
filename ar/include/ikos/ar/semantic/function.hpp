@@ -159,20 +159,20 @@ public:
 
   /// \brief Is it an ikos intrinsic function?
   bool is_ikos_intrinsic() const {
-    return this->_intrinsic_id >= Intrinsic::_BeginIkosIntrinsic &&
-           this->_intrinsic_id <= Intrinsic::_EndIkosIntrinsic;
+    return this->_intrinsic_id >= Intrinsic::BeginIkosIntrinsic &&
+           this->_intrinsic_id <= Intrinsic::EndIkosIntrinsic;
   }
 
   /// \brief Is it a libc intrinsic function?
   bool is_libc_intrinsic() const {
-    return this->_intrinsic_id >= Intrinsic::_BeginLibcIntrinsic &&
-           this->_intrinsic_id <= Intrinsic::_EndLibcIntrinsic;
+    return this->_intrinsic_id >= Intrinsic::BeginLibcIntrinsic &&
+           this->_intrinsic_id <= Intrinsic::EndLibcIntrinsic;
   }
 
   /// \brief Is it a libc++ intrinsic function
   bool is_libcpp_intrinsic() const {
-    return this->_intrinsic_id >= Intrinsic::_BeginLibcppIntrinsic &&
-           this->_intrinsic_id <= Intrinsic::_EndLibcppIntrinsic;
+    return this->_intrinsic_id >= Intrinsic::BeginLibcppIntrinsic &&
+           this->_intrinsic_id <= Intrinsic::EndLibcppIntrinsic;
   }
 
   /// \brief Get the intrinsic ID

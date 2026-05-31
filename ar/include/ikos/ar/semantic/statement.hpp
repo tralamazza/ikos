@@ -81,10 +81,10 @@ public:
     ExtractElementKind,
     InsertElementKind,
     ShuffleVectorKind,
-    _BeginCallBaseKind,
+    BeginCallBaseKind,
     CallKind,
     InvokeKind,
-    _EndCallBaseKind,
+    EndCallBaseKind,
     LandingPadKind,
     ResumeKind,
   };
@@ -314,8 +314,8 @@ class BinaryOperation final : public Statement {
 public:
   /// \brief List of operators
   enum Operator {
-    _BeginIntegerOp,
-    _BeginUnsignedIntegerOp,
+    BeginIntegerOp,
+    BeginUnsignedIntegerOp,
     UAdd,
     USub,
     UMul,
@@ -327,8 +327,8 @@ public:
     UAnd,
     UOr,
     UXor,
-    _EndUnsignedIntegerOp,
-    _BeginSignedIntegerOp,
+    EndUnsignedIntegerOp,
+    BeginSignedIntegerOp,
     SAdd,
     SSub,
     SMul,
@@ -340,15 +340,15 @@ public:
     SAnd,
     SOr,
     SXor,
-    _EndSignedIntegerOp,
-    _EndIntegerOp,
-    _BeginFloatOp,
+    EndSignedIntegerOp,
+    EndIntegerOp,
+    BeginFloatOp,
     FAdd,
     FSub,
     FMul,
     FDiv,
     FRem,
-    _EndFloatOp,
+    EndFloatOp,
   };
 
 private:
@@ -407,24 +407,24 @@ public:
 
   /// \brief Is it an integer operation?
   bool is_integer_op() const {
-    return this->_op >= _BeginIntegerOp && this->_op <= _EndIntegerOp;
+    return this->_op >= BeginIntegerOp && this->_op <= EndIntegerOp;
   }
 
   /// \brief Is it an unsigned integer operation?
   bool is_unsigned_op() const {
-    return this->_op >= _BeginUnsignedIntegerOp &&
-           this->_op <= _EndUnsignedIntegerOp;
+    return this->_op >= BeginUnsignedIntegerOp &&
+           this->_op <= EndUnsignedIntegerOp;
   }
 
   /// \brief Is it a signed integer operation?
   bool is_signed_op() const {
-    return this->_op >= _BeginSignedIntegerOp &&
-           this->_op <= _EndSignedIntegerOp;
+    return this->_op >= BeginSignedIntegerOp &&
+           this->_op <= EndSignedIntegerOp;
   }
 
   /// \brief Is it a floating point operation?
   bool is_float_op() const {
-    return this->_op >= _BeginFloatOp && this->_op <= _EndFloatOp;
+    return this->_op >= BeginFloatOp && this->_op <= EndFloatOp;
   }
 
   /// \brief Check if the given operator wraps integers
@@ -472,25 +472,25 @@ class Comparison final : public Statement {
 public:
   /// \brief List of predicates
   enum Predicate {
-    _BeginIntegerPred,
-    _BeginUnsignedIntegerPred,
+    BeginIntegerPred,
+    BeginUnsignedIntegerPred,
     UIEQ,
     UINE,
     UIGT,
     UIGE,
     UILT,
     UILE,
-    _EndUnsignedIntegerPred,
-    _BeginSignedIntegerPred,
+    EndUnsignedIntegerPred,
+    BeginSignedIntegerPred,
     SIEQ,
     SINE,
     SIGT,
     SIGE,
     SILT,
     SILE,
-    _EndSignedIntegerPred,
-    _EndIntegerPred,
-    _BeginFloatPred,
+    EndSignedIntegerPred,
+    EndIntegerPred,
+    BeginFloatPred,
     FOEQ,
     FOGT,
     FOGE,
@@ -505,15 +505,15 @@ public:
     FULT,
     FULE,
     FUNE,
-    _EndFloatPred,
-    _BeginPointerPred,
+    EndFloatPred,
+    BeginPointerPred,
     PEQ,
     PNE,
     PGT,
     PGE,
     PLT,
     PLE,
-    _EndPointerPred,
+    EndPointerPred,
   };
 
 private:
@@ -541,32 +541,32 @@ public:
 
   /// \brief Is it an integer comparison?
   bool is_integer_predicate() const {
-    return this->_predicate >= _BeginIntegerPred &&
-           this->_predicate <= _EndIntegerPred;
+    return this->_predicate >= BeginIntegerPred &&
+           this->_predicate <= EndIntegerPred;
   }
 
   /// \brief Is it an unsigned integer comparison?
   bool is_unsigned_predicate() const {
-    return this->_predicate >= _BeginUnsignedIntegerPred &&
-           this->_predicate <= _EndUnsignedIntegerPred;
+    return this->_predicate >= BeginUnsignedIntegerPred &&
+           this->_predicate <= EndUnsignedIntegerPred;
   }
 
   /// \brief Is it a signed integer comparison?
   bool is_signed_predicate() const {
-    return this->_predicate >= _BeginSignedIntegerPred &&
-           this->_predicate <= _EndSignedIntegerPred;
+    return this->_predicate >= BeginSignedIntegerPred &&
+           this->_predicate <= EndSignedIntegerPred;
   }
 
   /// \brief Is it a floating point comparison?
   bool is_float_predicate() const {
-    return this->_predicate >= _BeginFloatPred &&
-           this->_predicate <= _EndFloatPred;
+    return this->_predicate >= BeginFloatPred &&
+           this->_predicate <= EndFloatPred;
   }
 
   /// \brief Is it a pointer comparison?
   bool is_pointer_predicate() const {
-    return this->_predicate >= _BeginPointerPred &&
-           this->_predicate <= _EndPointerPred;
+    return this->_predicate >= BeginPointerPred &&
+           this->_predicate <= EndPointerPred;
   }
 
   /// \brief Get a textual representation of the given predicate
@@ -1103,7 +1103,7 @@ public:
 
   /// \brief Method for type support (isa, cast, dyn_cast)
   static bool classof(const Statement* s) {
-    return s->kind() >= _BeginCallBaseKind && s->kind() <= _EndCallBaseKind;
+    return s->kind() >= BeginCallBaseKind && s->kind() <= EndCallBaseKind;
   }
 
 }; // end class CallBase

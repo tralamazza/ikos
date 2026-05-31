@@ -60,8 +60,6 @@ ProgressLogger::ProgressLogger(std::ostream& out, Context& ctx)
 
 // InteractiveProgressLogger
 
-constexpr const std::chrono::seconds InteractiveProgressLogger::RefreshRate;
-
 InteractiveProgressLogger::InteractiveProgressLogger(std::ostream& out,
                                                      Context& ctx,
                                                      std::size_t out_columns)

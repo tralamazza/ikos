@@ -99,21 +99,21 @@ class Variable {
 public:
   /// \brief Kind of the variable
   enum VariableKind {
-    _BeginArVariableKind,
+    BeginArVariableKind,
     LocalVariableKind,
     GlobalVariableKind,
     InternalVariableKind,
     InlineAssemblyPointerVariableKind,
     FunctionPointerVariableKind,
-    _EndArVariableKind,
-    _BeginShadowVariableKind,
+    EndArVariableKind,
+    BeginShadowVariableKind,
     CellVariableKind,
     OffsetVariableKind,
     AllocSizeVariableKind,
     ReturnVariableKind,
     NamedShadowVariableKind,
     UnnamedShadowVariableKind,
-    _EndShadowVariableKind,
+    EndShadowVariableKind,
   };
 
 protected:

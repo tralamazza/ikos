@@ -72,7 +72,7 @@ public:
     LifetimeEnd,
     EhTypeidFor,
     Trap,
-    _BeginIkosIntrinsic,
+    BeginIkosIntrinsic,
     // <ikos/analyzer/intrinsic.h>
     IkosAssert,
     IkosAssume,
@@ -90,8 +90,8 @@ public:
     IkosPartitioningDisable,
     IkosPrintInvariant,
     IkosPrintValues,
-    _EndIkosIntrinsic,
-    _BeginLibcIntrinsic,
+    EndIkosIntrinsic,
+    BeginLibcIntrinsic,
     // <stdlib.h>
     LibcMalloc,
     LibcCalloc,
@@ -150,8 +150,8 @@ public:
     LibcMemoryMoveCheck,
     LibcMemorySetCheck,
     LibcStrcatCheck,
-    _EndLibcIntrinsic,
-    _BeginLibcppIntrinsic,
+    EndLibcIntrinsic,
+    BeginLibcppIntrinsic,
     LibcppNew,
     LibcppNewArray,
     LibcppDelete,
@@ -161,7 +161,7 @@ public:
     LibcppThrow,
     LibcppBeginCatch,
     LibcppEndCatch,
-    _EndLibcppIntrinsic,
+    EndLibcppIntrinsic,
   };
 
   /// \brief Prefix for names of intrinsic functions, ie. "ar."
