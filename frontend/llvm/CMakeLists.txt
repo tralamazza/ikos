@@ -135,6 +135,7 @@ add_compiler_flag(REQUIRED "FVISIBILITY_INLINES_HIDDEN" "-fvisibility-inlines-hi
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compiler_flag(REQUIRED "WEVERYTHING" "-Weverything")
+  add_compiler_flag(REQUIRED "WERROR" "-Werror")
   add_compiler_flag(OPTIONAL "WNO_SWITCH_ENUM" "-Wno-switch-enum")
   add_compiler_flag(OPTIONAL "WNO_PADDED" "-Wno-padded")
   add_compiler_flag(OPTIONAL "WNO_CXX98_COMPAT" "-Wno-c++98-compat")
@@ -157,6 +158,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   add_compiler_flag(REQUIRED "WALL" "-Wall")
   add_compiler_flag(REQUIRED "WEXTRA" "-Wextra")
+  add_compiler_flag(REQUIRED "WERROR" "-Werror")
 endif()
 
 #
