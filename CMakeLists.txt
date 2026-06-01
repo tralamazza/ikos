@@ -71,6 +71,20 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 # Generate compile_commands.json, used by clang-tidy
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
+# Apple's linker warns about the duplicate LLVM static libraries that appear on
+# the link line through transitive target dependencies. The duplicates are
+# harmless (ignored), so silence the warning when the linker supports the flag.
+# This goes in the linker flags only (not CMAKE_CXX_FLAGS), otherwise clang
+# would report -Wunused-command-line-argument on every compile step.
+if (APPLE)
+  include(CheckLinkerFlag)
+  check_linker_flag(CXX "LINKER:-no_warn_duplicate_libraries"
+    CXX_LINKER_SUPPORTS_NO_WARN_DUPLICATE_LIBRARIES)
+  if (CXX_LINKER_SUPPORTS_NO_WARN_DUPLICATE_LIBRARIES)
+    string(APPEND CMAKE_EXE_LINKER_FLAGS " -Wl,-no_warn_duplicate_libraries")
+  endif()
+endif()
+
 include(HandleOptions)
 
 # Enable tests
