@@ -145,7 +145,10 @@ void InteractiveProgressLogger::end_callee(CallContext* /*call_context*/,
   this->_current_stack_frame.pop_back();
 }
 
-void InteractiveProgressLogger::start_message() {
+// start_message acquires _mutex and end_message releases it. Clang's thread
+// safety analysis cannot model a lock held across two separate functions whose
+// base interface is unannotated, so it is disabled for this pair.
+void InteractiveProgressLogger::start_message() ikos_no_thread_safety_analysis {
   // Lock the mutex, unlock in end_message()
   this->_mutex.lock();
 
@@ -153,7 +156,7 @@ void InteractiveProgressLogger::start_message() {
   this->clear_displayed_stack_frame();
 }
 
-void InteractiveProgressLogger::end_message() {
+void InteractiveProgressLogger::end_message() ikos_no_thread_safety_analysis {
   // Unlock the mutex
   this->_mutex.unlock();
 }

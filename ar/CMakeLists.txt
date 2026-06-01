@@ -109,6 +109,10 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compiler_flag(OPTIONAL "WNO_CXX98_COMPAT_PEDANTIC" "-Wno-c++98-compat-pedantic")
   add_compiler_flag(OPTIONAL "WNO_COVERED_SWITCH_DEFAULT" "-Wno-covered-switch-default")
   add_compiler_flag(OPTIONAL "WNO_WEAK_VTABLES" "-Wno-weak-vtables")
+  # Negative capabilities (!mutex) are an experimental part of -Weverything,
+  # not of -Wthread-safety. They cannot be satisfied without threading negative
+  # requirements through the whole call graph, so disable them.
+  add_compiler_flag(OPTIONAL "WNO_THREAD_SAFETY_NEGATIVE" "-Wno-thread-safety-negative")
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   add_compiler_flag(REQUIRED "WALL" "-Wall")
   add_compiler_flag(REQUIRED "WEXTRA" "-Wextra")

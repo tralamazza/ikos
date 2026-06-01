@@ -602,7 +602,10 @@ public:
     this->_var_map.clear();
   }
 
-  bool leq(const ApronDomain& other) const override {
+  // Locks both this->_mutex and other._mutex at once with std::lock and
+  // std::adopt_lock, a pattern clang's thread safety analysis cannot model.
+  bool leq(const ApronDomain& other) const override
+      ikos_no_thread_safety_analysis {
     if (this == &other) {
       return true;
     }
@@ -625,7 +628,8 @@ public:
     }
   }
 
-  bool equals(const ApronDomain& other) const override {
+  bool equals(const ApronDomain& other) const override
+      ikos_no_thread_safety_analysis {
     if (this == &other) {
       return true;
     }
@@ -648,7 +652,7 @@ public:
     }
   }
 
-  void join_with(ApronDomain&& other) override {
+  void join_with(ApronDomain&& other) override ikos_no_thread_safety_analysis {
     if (this == &other) {
       return;
     }
@@ -673,7 +677,8 @@ public:
     }
   }
 
-  void join_with(const ApronDomain& other) override {
+  void join_with(const ApronDomain& other) override
+      ikos_no_thread_safety_analysis {
     if (this == &other) {
       return;
     }
@@ -699,7 +704,8 @@ public:
     }
   }
 
-  ApronDomain join(const ApronDomain& other) const override {
+  ApronDomain join(const ApronDomain& other) const override
+      ikos_no_thread_safety_analysis {
     if (this == &other) {
       return *this;
     }
@@ -730,7 +736,8 @@ public:
     }
   }
 
-  ApronDomain widening(const ApronDomain& other) const override {
+  ApronDomain widening(const ApronDomain& other) const override
+      ikos_no_thread_safety_analysis {
     if (this == &other) {
       return *this;
     }
@@ -776,7 +783,8 @@ public:
     this->widen_with(other);
   }
 
-  ApronDomain meet(const ApronDomain& other) const override {
+  ApronDomain meet(const ApronDomain& other) const override
+      ikos_no_thread_safety_analysis {
     if (this == &other) {
       return *this;
     }
@@ -808,7 +816,8 @@ public:
     this->operator=(this->meet(other));
   }
 
-  ApronDomain narrowing(const ApronDomain& other) const override {
+  ApronDomain narrowing(const ApronDomain& other) const override
+      ikos_no_thread_safety_analysis {
     if (this == &other) {
       return *this;
     }

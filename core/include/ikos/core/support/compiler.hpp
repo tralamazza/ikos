@@ -106,4 +106,18 @@
 /// \brief Remove unused variable warnings for the given variable
 #define ikos_ignore(VAR) static_cast< void >(VAR)
 
+/// \macro ikos_no_thread_safety_analysis
+/// \brief Disable clang's thread safety analysis for the given function
+///
+/// Used on functions whose locking discipline clang's thread safety analysis
+/// cannot model, e.g. functions that lock two mutexes at once with std::lock
+/// and std::adopt_lock, or that acquire a mutex in one function and release it
+/// in another.
+#if __has_attribute(no_thread_safety_analysis)
+# define ikos_no_thread_safety_analysis \
+    __attribute__((no_thread_safety_analysis))
+#else
+# define ikos_no_thread_safety_analysis
+#endif
+
 // clang-format on
