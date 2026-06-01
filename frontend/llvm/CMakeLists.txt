@@ -146,6 +146,14 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   # not of -Wthread-safety. They cannot be satisfied without threading negative
   # requirements through the whole call graph, so disable them.
   add_compiler_flag(OPTIONAL "WNO_THREAD_SAFETY_NEGATIVE" "-Wno-thread-safety-negative")
+  # NRVO cannot apply when branches return different objects; the warning is
+  # noise here, not a fixable missed optimization.
+  add_compiler_flag(OPTIONAL "WNO_NRVO" "-Wno-nrvo")
+  # Switches over enums are intentionally exhaustive with no default, so that
+  # -Wswitch flags any missing case. -Wswitch-default wants the opposite.
+  add_compiler_flag(OPTIONAL "WNO_SWITCH_DEFAULT" "-Wno-switch-default")
+  # /usr/local/include on the include path is fine for a native build.
+  add_compiler_flag(OPTIONAL "WNO_POISON_SYSTEM_DIRECTORIES" "-Wno-poison-system-directories")
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   add_compiler_flag(REQUIRED "WALL" "-Wall")
   add_compiler_flag(REQUIRED "WEXTRA" "-Wextra")
