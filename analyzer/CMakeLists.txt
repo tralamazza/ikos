@@ -202,8 +202,10 @@ include_directories(include)
 install(FILES include/ikos/analyzer/intrinsic.h
   DESTINATION include/ikos/analyzer)
 
-# ikos-analyzer binary
-add_executable(ikos-analyzer
+# Everything except main() is built into a static library so the analyzer
+# pipeline can also be linked into other tools (capi.h: ikos_analyzer_run).
+add_library(ikos-analyzer-core STATIC
+  src/capi.cpp
   src/ikos_analyzer.cpp
   src/analysis/call_context.cpp
   src/analysis/fixpoint_parameters.cpp
@@ -295,15 +297,17 @@ add_executable(ikos-analyzer
 if (IKOS_LINK_LLVM_DYLIB)
   set(IKOS_ANALYZER_LLVM_LIBS "LLVM")
 else()
+  # `passes` is needed by the in-process -mem2reg pipeline (PassBuilder).
   llvm_map_components_to_libnames(IKOS_ANALYZER_LLVM_LIBS
     core
     ipo
     irreader
+    passes
     support
     transformutils
   )
 endif()
-target_link_libraries(ikos-analyzer
+target_link_libraries(ikos-analyzer-core PUBLIC
   Threads::Threads
   ${FRONTEND_LLVM_TO_AR_LIB}
   ${IKOS_ANALYZER_LLVM_LIBS}
@@ -315,9 +319,17 @@ target_link_libraries(ikos-analyzer
   ${AR_LIB}
 )
 if (APRON_FOUND)
-  target_link_libraries(ikos-analyzer ${APRON_LIBRARIES})
+  target_link_libraries(ikos-analyzer-core PUBLIC ${APRON_LIBRARIES})
 endif()
+
+# ikos-analyzer binary: main() plus the core library.
+add_executable(ikos-analyzer src/main.cpp)
+target_link_libraries(ikos-analyzer ikos-analyzer-core)
+
 install(TARGETS ikos-analyzer RUNTIME DESTINATION bin)
+install(TARGETS ikos-analyzer-core ARCHIVE DESTINATION lib)
+install(FILES include/ikos/analyzer/capi.h
+  DESTINATION include/ikos/analyzer)
 
 # python wrapper
 option(APPEND_GIT_VERSION "Append the current git commit to the version number" OFF)

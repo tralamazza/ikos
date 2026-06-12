@@ -50,6 +50,7 @@
 
 #include <llvm/IR/Verifier.h>
 #include <llvm/IRReader/IRReader.h>
+#include <llvm/Passes/PassBuilder.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/InitLLVM.h>
@@ -88,6 +89,7 @@
 #include <ikos/analyzer/analysis/value/intraprocedural/sequential/analysis.hpp>
 #include <ikos/analyzer/analysis/variable.hpp>
 #include <ikos/analyzer/analysis/widening_hint.hpp>
+#include <ikos/analyzer/analyzer_main.hpp>
 #include <ikos/analyzer/checker/name.hpp>
 #include <ikos/analyzer/database/output.hpp>
 #include <ikos/analyzer/util/color.hpp>
@@ -515,6 +517,12 @@ static llvm::cl::opt< bool > NoWrapSignOnly(
         "still apply) and model integer arithmetic as wrapping"),
     llvm::cl::cat(ImportCategory));
 
+static llvm::cl::opt< bool > Mem2Reg(
+    "mem2reg",
+    llvm::cl::desc("Run the LLVM mem2reg,sroa passes on the module before "
+                   "translation (equivalent to `opt -passes=mem2reg,sroa`)"),
+    llvm::cl::cat(ImportCategory));
+
 /// @}
 /// \name Passes options
 /// @{
@@ -872,9 +880,10 @@ static void generate_dot(ar::Bundle* bundle,
 }
 
 /// \brief Main for ikos-analyzer
-int main(int argc, char** argv) {
-  llvm::InitLLVM x(argc, argv);
-
+// Body at global scope: defining this inside namespace ikos::analyzer would
+// make unqualified lookup find namespace members (LogLevel, Procedural, ...)
+// instead of the file-static llvm::cl options of the same names.
+static int analyzer_main_impl(int argc, char** argv) {
   // Program name
   // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-pointer-arithmetic)
   std::string progname = boost::filesystem::path(argv[0]).filename().string();
@@ -888,6 +897,10 @@ int main(int argc, char** argv) {
   /*
    * Parse parameters
    */
+
+  // Clear occurrences left by a previous in-process run (C API callers may
+  // invoke the analyzer several times per process).
+  llvm::cl::ResetAllOptionOccurrences();
 
   const char* overview = "ikos-analyzer -- IKOS static analyzer";
   llvm::cl::ParseCommandLineOptions(argc, argv, overview);
@@ -940,6 +953,31 @@ int main(int argc, char** argv) {
         llvm::errs() << progname << ": " << InputFilename
                      << ": warning: llvm bitcode has no debug information\n";
       }
+    }
+
+    // Promote allocas to SSA registers in-process. This replaces the
+    // external `opt -passes=mem2reg,sroa` preprocessing step; the pipeline
+    // string goes through PassBuilder so the semantics are identical.
+    if (Mem2Reg) {
+      analyzer::log::debug("Running mem2reg,sroa on LLVM bitcode");
+      analyzer::ScopeTimerDatabase t(output_db.times, "ikos-analyzer.mem2reg");
+      llvm::LoopAnalysisManager lam;
+      llvm::FunctionAnalysisManager fam;
+      llvm::CGSCCAnalysisManager cgam;
+      llvm::ModuleAnalysisManager mam;
+      llvm::PassBuilder pb;
+      pb.registerModuleAnalyses(mam);
+      pb.registerCGSCCAnalyses(cgam);
+      pb.registerFunctionAnalyses(fam);
+      pb.registerLoopAnalyses(lam);
+      pb.crossRegisterProxies(lam, fam, cgam, mam);
+      llvm::ModulePassManager mpm;
+      if (llvm::Error e = pb.parsePassPipeline(mpm, "mem2reg,sroa")) {
+        llvm::errs() << progname << ": error: " << llvm::toString(std::move(e))
+                     << "\n";
+        return 4;
+      }
+      mpm.run(*module, mam);
     }
 
     // AR context
@@ -1152,4 +1190,8 @@ int main(int argc, char** argv) {
                  << ": error: " << err.what() << "\n";
     return 9;
   }
+}
+
+int ikos::analyzer::analyzer_main(int argc, char** argv) {
+  return analyzer_main_impl(argc, argv);
 }
