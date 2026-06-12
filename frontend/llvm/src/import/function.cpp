@@ -1203,12 +1203,15 @@ void FunctionImporter::translate_binary_operator(
       result->set_frontend< llvm::Value >(inst);
     }
 
-    // Add the no-wrap flag
+    // Add the no-wrap flag. Under NoWrapFlagsSignOnly the flags were already
+    // consumed by sign_from_wraps(); the abstract semantics stay wrapping.
     bool no_wrap = false;
-    if (auto wrapping_inst =
-            llvm::dyn_cast< llvm::OverflowingBinaryOperator >(inst)) {
-      no_wrap = wrapping_inst->hasNoSignedWrap() ||
-                wrapping_inst->hasNoUnsignedWrap();
+    if (!_ctx.opts.test(Importer::NoWrapFlagsSignOnly)) {
+      if (auto wrapping_inst =
+              llvm::dyn_cast< llvm::OverflowingBinaryOperator >(inst)) {
+        no_wrap = wrapping_inst->hasNoSignedWrap() ||
+                  wrapping_inst->hasNoUnsignedWrap();
+      }
     }
 
     // Add the exact flag

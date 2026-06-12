@@ -93,6 +93,12 @@ static llvm::cl::opt< bool > AllowDebugInfoMismatch(
     "allow-dbg-mismatch",
     llvm::cl::desc("Allow incorrect debug information in the module"));
 
+static llvm::cl::opt< bool > NoWrapSignOnly(
+    "no-wrap-sign-only",
+    llvm::cl::desc(
+        "Use nsw/nuw flags for signedness inference only (overflow checks "
+        "still apply) and model integer arithmetic as wrapping"));
+
 static llvm::cl::opt< bool > NoTypeCheck(
     "no-type-check", llvm::cl::desc("Do not run the AR type checker"));
 
@@ -129,6 +135,7 @@ static llvm_to_ar::Importer::ImportOptions make_import_options() {
   opts.set(llvm_to_ar::Importer::EnableLibcpp, !NoLibcpp);
   opts.set(llvm_to_ar::Importer::AllowMismatchDebugInfo,
            AllowDebugInfoMismatch);
+  opts.set(llvm_to_ar::Importer::NoWrapFlagsSignOnly, NoWrapSignOnly);
   return opts;
 }
 

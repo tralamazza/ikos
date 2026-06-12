@@ -660,11 +660,14 @@ std::unique_ptr< ar::BinaryOperation > ConstantImporter::
   // hasNoSignedWrap / hasNoUnsignedWrap / isExact unconditionally cast
   // 'this' to OverflowingBinaryOperator / PossiblyExactOperator inside
   // LLVM, so they must be gated by dyn_cast on the generic BinaryOperator.
+  // Under NoWrapFlagsSignOnly the abstract semantics stay wrapping.
   bool no_wrap = false;
-  if (auto wrapping_inst =
-          llvm::dyn_cast< llvm::OverflowingBinaryOperator >(inst)) {
-    no_wrap = wrapping_inst->hasNoSignedWrap() ||
-              wrapping_inst->hasNoUnsignedWrap();
+  if (!_ctx.opts.test(Importer::NoWrapFlagsSignOnly)) {
+    if (auto wrapping_inst =
+            llvm::dyn_cast< llvm::OverflowingBinaryOperator >(inst)) {
+      no_wrap = wrapping_inst->hasNoSignedWrap() ||
+                wrapping_inst->hasNoUnsignedWrap();
+    }
   }
 
   bool exact = false;

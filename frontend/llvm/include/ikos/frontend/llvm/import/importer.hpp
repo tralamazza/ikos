@@ -84,6 +84,22 @@ public:
     /// Enable this option if `ikos-pp -opt=aggressive` was used.
     AllowMismatchDebugInfo = 0x8,
 
+    /// \brief Use nsw/nuw flags for signedness inference only
+    ///
+    /// By default, the no-wrap flags do two things: they pick the signed or
+    /// unsigned AR operator (which selects the sio or uio check), and they
+    /// set the no_wrap bit on the AR statement, which makes the analysis
+    /// assume the operation cannot overflow (sound for C, where nsw overflow
+    /// is undefined behavior).
+    ///
+    /// With this option, the flags still pick the operator signedness, but
+    /// the no_wrap bit is never set: arithmetic is modeled as wrapping
+    /// (two's complement). Use this for languages where overflow is defined
+    /// to wrap and nsw merely tags operations as signed so that the sio
+    /// check applies; the default would otherwise turn every unproven
+    /// overflow warning into an assumption for the code downstream of it.
+    NoWrapFlagsSignOnly = 0x10,
+
     /// \brief Default options
     DefaultOptions =
         EnableLibIkos | EnableLibc | EnableLibcpp | AllowMismatchDebugInfo,
