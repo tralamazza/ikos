@@ -102,7 +102,13 @@ include_directories(SYSTEM ${TBB_INCLUDE_DIRS})
 find_package(SQLite3 REQUIRED)
 include_directories(SYSTEM ${SQLITE3_INCLUDE_DIR})
 
-find_package(APRON)
+# APRON pulls in the GPL-licensed PPL bridge (libap_ppl); builds whose
+# static library is linked into non-GPL tools (e.g. bml verify) must
+# disable it.
+option(IKOS_DISABLE_APRON "Build without the APRON abstract domains" OFF)
+if (NOT IKOS_DISABLE_APRON)
+  find_package(APRON)
+endif()
 if (APRON_FOUND)
   include_directories(SYSTEM ${APRON_INCLUDE_DIRS})
   add_definitions("-DHAS_APRON")
@@ -183,6 +189,10 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compiler_flag(OPTIONAL "WNO_SWITCH_DEFAULT" "-Wno-switch-default")
   # /usr/local/include on the include path is fine for a native build.
   add_compiler_flag(OPTIONAL "WNO_POISON_SYSTEM_DIRECTORIES" "-Wno-poison-system-directories")
+  # In IKOS_DISABLE_APRON builds the apron domain factories compile to
+  # always-throw stubs; they cannot be declared noreturn because the same
+  # declarations return values when APRON is enabled.
+  add_compiler_flag(OPTIONAL "WNO_MISSING_NORETURN" "-Wno-missing-noreturn")
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   add_compiler_flag(REQUIRED "WALL" "-Wall")
   add_compiler_flag(REQUIRED "WEXTRA" "-Wextra")
