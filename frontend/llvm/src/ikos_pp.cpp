@@ -86,7 +86,9 @@ static llvm::cl::opt< bool > OutputAssembly(
 
 static llvm::cl::list< std::string > EntryPoints(
     "entry-points",
-    llvm::cl::desc("List of program entry points"),
+    llvm::cl::desc("List of program entry points (currently no effect: the only "
+                   "consumer, -internalize, was dropped on LLVM 18; kept for CLI "
+                   "compatibility -- ikos-analyzer has its own -entry-points)"),
     llvm::cl::CommaSeparated,
     llvm::cl::value_desc("function"));
 
@@ -279,11 +281,10 @@ int main(int argc, char** argv) {
     // in LLVM 18; compensated by the importer's AR exit-block unification.
   } else if (OptLevel == Aggressive) {
     // Internalize, GlobalDCE and GlobalOpt were dropped from the legacy PM in
-    // LLVM 18 (still available as new-PM passes: InternalizePass, GlobalDCEPass,
-    // GlobalOptPass). Restoring them would require standing up a new-PM
-    // sub-pipeline; see the TODO at the end of this branch. `EntryPoints` only
-    // fed Internalize here, so it is unused on this path until then (the
-    // analyzer still consumes -entry-points for choosing analysis roots).
+    // LLVM 18. They are deliberately not restored: they have no measurable
+    // effect on IKOS results (see the NOTE at the end of this branch).
+    // `EntryPoints` only fed Internalize here and is now unused; the analyzer's
+    // own -entry-points is what scopes the analysis.
     (void) EntryPoints;
 
     // Remove unreachable blocks
@@ -391,18 +392,21 @@ int main(int argc, char** argv) {
     // Lower down select instructions (ikos-pp -lower-select)
     pass_manager.add(ikos_pp::create_lower_select_pass());
 
-    // TODO(llvm18): Internalize, GlobalOpt, GlobalDCE, SCCP, JumpThreading and
-    // LoopDeletion were dropped above because LLVM 18 removed their legacy-PM
-    // constructors. They still exist as new-PM passes, so restoring them means
-    // running a new-PM ModulePassManager (PassBuilder + the four analysis
-    // managers) in phases around this legacy pipeline -- IKOS's own passes
-    // (lower_select, lower_cst_expr, etc.) are still legacy-only, so the two
-    // managers cannot be merged. This only affects the "aggressive" level,
-    // which is opt-in and documented as "not recommended"; the default "basic"
-    // level is unaffected and the existing aggressive regression tests still
-    // pass without these passes (IKOS's abstract domains do their own constant
-    // propagation). Restoring may also worsen import robustness, since more
-    // heavily optimized IR is harder to translate under opaque pointers.
+    // NOTE(llvm18): the passes dropped above (Internalize, GlobalOpt, GlobalDCE,
+    // SCCP, JumpThreading, LoopDeletion) lost their legacy-PM constructors in
+    // LLVM 18 and are deliberately NOT restored -- measured against IKOS, they
+    // change nothing. IKOS's abstract domains subsume SCCP/JumpThreading/
+    // LoopDeletion: they propagate constants and ranges and prune dead branches
+    // those passes cannot (e.g. a range-dead `if (i > 100)` arm where the domain
+    // already knows i < 5). And the analyzer scopes its work to -entry-points
+    // plus the reachable call graph, so Internalize/GlobalDCE (linkage and
+    // dead-symbol removal) do not change what gets analyzed -- an uncalled
+    // external function yields zero checks either way. Restoring them would mean
+    // standing up a separate new-PM ModulePassManager beside this legacy
+    // pipeline (IKOS's own legacy-only passes -- lower_select, lower_cst_expr --
+    // cannot be merged in) for no analysis benefit, and could hurt import
+    // robustness since more heavily optimized IR is harder to translate under
+    // opaque pointers. "aggressive" is opt-in and "not recommended".
   } else {
     ikos_assert(OptLevel == Custom);
 
