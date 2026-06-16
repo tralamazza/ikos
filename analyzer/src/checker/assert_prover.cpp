@@ -42,6 +42,7 @@
  ******************************************************************************/
 
 #include <ikos/analyzer/checker/assert_prover.hpp>
+#include <ikos/analyzer/json/helper.hpp>
 #include <ikos/analyzer/support/cast.hpp>
 #include <ikos/analyzer/util/log.hpp>
 
@@ -67,12 +68,44 @@ void AssertProverChecker::check(ar::Statement* stmt,
     if (fun->intrinsic_id() == ar::Intrinsic::IkosAssert) {
       CheckResult check = this->check_assert(call, inv);
       this->display_invariant(check.result, call, inv);
+
+      // Witness operands: callers (e.g. BML) may append the operands that
+      // feed the asserted condition after argument(0) -- typically the two
+      // sides of the comparison (a computed quantity and its limit). Record
+      // their abstract intervals so the report can show the concrete ranges
+      // instead of just the condition's SSA name. Informational only: the
+      // verdict above uses argument(0) alone. A non-Ok/Unreachable result
+      // implies the normal flow is not bottom, so int_to_interval() is valid.
+      JsonDict info;
+      if (check.result == Result::Error || check.result == Result::Warning) {
+        JsonList witness;
+        for (std::size_t i = 1; i < call->num_arguments(); i++) {
+          const ScalarLit& arg =
+              this->_lit_factory.get_scalar(call->argument(i));
+          // Convert here (ordinary lookup finds analyzer::to_json); passing a
+          // raw Interval would make JsonList::add's internal to_json() call
+          // rely on ADL into core::machine_int, where it is not declared.
+          if (arg.is_machine_int()) {
+            witness.add(to_json(IntInterval(arg.machine_int())));
+          } else if (arg.is_machine_int_var()) {
+            IntInterval itv = inv.normal().int_to_interval(arg.var());
+            if (!itv.is_bottom()) {
+              witness.add(to_json(itv));
+            }
+          }
+        }
+        if (!witness.empty()) {
+          info.put("witness", witness);
+        }
+      }
+
       this->_checks.insert(check.kind,
                            CheckerName::AssertProver,
                            check.result,
                            stmt,
                            call_context,
-                           std::array< ar::Value*, 1 >{{call->argument(0)}});
+                           std::array< ar::Value*, 1 >{{call->argument(0)}},
+                           info);
     }
   }
 }

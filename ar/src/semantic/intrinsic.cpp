@@ -148,6 +148,10 @@ FunctionType* Intrinsic::type(Bundle* bundle, ID id, Type* template_ty) {
     case IkosAssert: {
       ret_ty = void_ty;          // ret
       params.push_back(ui32_ty); // condition
+      // Callers may append the operands feeding the condition as witness
+      // values (reported as intervals; the verdict still uses only the
+      // condition). Variadic so 1-arg and N-arg __ikos_assert calls both type.
+      var_arg = true;
     } break;
     case IkosAssume: {
       ret_ty = void_ty;          // ret
