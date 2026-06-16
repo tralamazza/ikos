@@ -259,7 +259,7 @@ attributes #2 = { "correctly-rounded-divide-sqrt-fp-math"="false" "disable-tail-
 ; CHECK: target-endianness = little-endian
 ; CHECK: target-pointer-size = 64 bits
 ; CHECK: target-triple = x86_64-apple-macosx10.14.0
-; CHECK: declare void @ar.ikos.assert(ui32)
+; CHECK: declare void @ar.ikos.assert(ui32, ...)
 ; CHECK: define si32 @foo(si32* %1, si32* %2, si32* %3) {
 ; CHECK: #1 !entry successors={#2, #3} {
 ; CHECK:   si32** $4 = allocate si32*, 1, align 8

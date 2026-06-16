@@ -243,7 +243,7 @@ attributes #7 = { nounwind }
 ; CHECK:   return
 ; CHECK: }
 ; CHECK: }
-; CHECK: declare void @ar.ikos.assert(ui32)
+; CHECK: declare void @ar.ikos.assert(ui32, ...)
 ; CHECK: declare si8* @ar.libcpp.new(ui64)
 ; CHECK: define si32 @main() {
 ; CHECK: #1 !entry !exit {

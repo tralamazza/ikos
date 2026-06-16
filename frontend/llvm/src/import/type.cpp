@@ -2006,7 +2006,15 @@ bool TypeMatcher::match_function_type(llvm::Type* llvm_type,
 
 bool TypeMatcher::match_extern_function_type(llvm::FunctionType* llvm_type,
                                              ar::FunctionType* ar_type) {
-  if (llvm_type->isVarArg() != ar_type->is_var_arg() ||
+  // A variadic ar intrinsic also matches a non-variadic llvm declaration that
+  // supplies exactly its fixed parameters: such a declaration can only be
+  // called with those fixed arguments, which is a valid call of the variadic
+  // function. This keeps the standard non-variadic `void __ikos_assert(int)`
+  // (and any pre-existing bitcode) matching the variadic ar.ikos.assert
+  // intrinsic, while a witness-emitting caller's `void __ikos_assert(int, ...)`
+  // matches too. The reverse (variadic llvm, non-variadic ar) stays rejected:
+  // the call could pass arguments the ar type cannot represent.
+  if ((llvm_type->isVarArg() && !ar_type->is_var_arg()) ||
       llvm_type->getNumParams() != ar_type->num_parameters()) {
     return false;
   }
