@@ -729,8 +729,27 @@ ar::Type* TypeWithDebugInfoImporter::translate_di_only(
       // Opaque pointers hide the llvm::StructType pointee. Recover it by
       // matching the DI name against the module's identified struct types,
       // then run the full two-sided translator so AR gets a real struct layout.
-      if (llvm::StructType* struct_type = this->lookup_struct_by_di(comp)) {
-        return this->translate_type(struct_type, di_type);
+      //
+      // candidate_structs_by_di() only filters by name + total size, which is
+      // too weak to tell apart same-named/same-sized types (template
+      // instantiations Foo<int> vs Foo<float>, or Clang's .N shadow types).
+      // The full reconciliation in translate_type() validates every field
+      // offset and type against the DI, so use it as the real disambiguator:
+      // try each candidate on a throwaway fork and keep the first that
+      // translates cleanly. If none reconcile, fall back to OpaqueType rather
+      // than letting a wrong guess produce a bad layout or letting a
+      // TypeDebugInfoMismatch escape this best-effort path.
+      llvm::SmallVector< llvm::StructType*, 2 > candidates;
+      this->candidate_structs_by_di(comp, candidates);
+      for (llvm::StructType* struct_type : candidates) {
+        try {
+          TypeWithDebugInfoImporter imp = this->fork();
+          ar::Type* ar_type = imp.translate_type(struct_type, di_type);
+          this->join(imp);
+          return ar_type;
+        } catch (const TypeDebugInfoMismatch&) {
+          // Wrong candidate for this DI; try the next one.
+        }
       }
     }
     return ar::OpaqueType::create(this->_context);
@@ -768,7 +787,7 @@ ar::Type* TypeWithDebugInfoImporter::translate_di_only(
   return ar::OpaqueType::create(this->_context);
 }
 
-// Defined later -- used by lookup_struct_by_di and has_no_member to detect
+// Defined later -- used by candidate_structs_by_di and has_no_member to detect
 // EBO-empty DI composite types.
 static bool is_empty_composite(llvm::DICompositeType* di_type);
 
@@ -786,11 +805,12 @@ static llvm::StringRef strip_template_args(llvm::StringRef name) {
   return name.take_front(pos);
 }
 
-llvm::StructType* TypeWithDebugInfoImporter::lookup_struct_by_di(
-    llvm::DICompositeType* di_type) const {
+void TypeWithDebugInfoImporter::candidate_structs_by_di(
+    llvm::DICompositeType* di_type,
+    llvm::SmallVectorImpl< llvm::StructType* >& out) const {
   llvm::StringRef name = di_type->getName();
   if (name.empty()) {
-    return nullptr;
+    return;
   }
   auto& llvm_ctx = this->_module.getContext();
 
@@ -835,18 +855,22 @@ llvm::StructType* TypeWithDebugInfoImporter::lookup_struct_by_di(
   push_unique(bare.str());
   push_unique(name.str());
 
-  // A candidate LLVM struct must be structurally compatible with the DI.
-  // Two pitfalls under templated C++ types:
+  // A candidate LLVM struct must be at least size-compatible with the DI.
+  // This is a cheap pre-filter only; the caller reconciles each surviving
+  // candidate against the DI in full and makes the final choice. Two pitfalls
+  // under templated C++ types:
   //   1. Different template instantiations can share a base name but differ
-  //      in layout; pick by bit-size compatibility, not by name alone.
+  //      in layout; size compatibility alone cannot tell them apart, which is
+  //      why this is a pre-filter and not the final answer.
   //   2. EBO-empty bases (e.g. __compressed_pair_elem<X, 1, true>) often
   //      have a DI entry but no LLVM struct of their own -- they were
   //      elided. The unqualified name still resolves to the *non-empty*
   //      instantiation's LLVM struct, and the alignTo()-based size check
   //      from translate_struct_di_type happens to accept that mismatch
   //      because empty C++ DI size (8 bits) rounds up to the larger
-  //      LLVM struct's alignment. Reject any non-padding LLVM field when
-  //      the DI is empty so translate_di_only falls back to OpaqueType.
+  //      LLVM struct's alignment. Reject any non-padding LLVM field when the
+  //      DI is empty so this candidate is dropped (translate_struct_di_type
+  //      would not catch it, unlike a normal layout mismatch).
   const uint64_t di_size_bits = di_type->getSizeInBits();
   const bool di_is_empty = is_empty_composite(di_type);
   auto all_fields_are_padding = [](llvm::StructType* st) {
@@ -879,14 +903,21 @@ llvm::StructType* TypeWithDebugInfoImporter::lookup_struct_by_di(
     return llvm::alignTo(di_size_bits, align_bits) == st_bits;
   };
 
+  // Collect every distinct candidate passing the cheap name + size pre-filter,
+  // in priority order; the caller picks among them with the full translator.
+  auto add_candidate = [&](llvm::StructType* st) {
+    if (st == nullptr || !layout_matches(st)) {
+      return;
+    }
+    if (std::find(out.begin(), out.end(), st) == out.end()) {
+      out.push_back(st);
+    }
+  };
+
   for (const std::string& base : base_candidates) {
     for (const char* prefix : {"struct.", "class.", "union."}) {
       std::string candidate = prefix + base;
-      if (auto* st = llvm::StructType::getTypeByName(llvm_ctx, candidate)) {
-        if (layout_matches(st)) {
-          return st;
-        }
-      }
+      add_candidate(llvm::StructType::getTypeByName(llvm_ctx, candidate));
     }
   }
 
@@ -906,13 +937,13 @@ llvm::StructType* TypeWithDebugInfoImporter::lookup_struct_by_di(
         bool name_match = (tail == base) ||
                           (tail.starts_with(base) && tail.size() > base.size() &&
                            tail[base.size()] == '.');
-        if (name_match && layout_matches(st)) {
-          return st;
+        if (name_match) {
+          add_candidate(st);
+          break;
         }
       }
     }
   }
-  return nullptr;
 }
 
 ar::Type* TypeWithDebugInfoImporter::translate_composite_di_type(

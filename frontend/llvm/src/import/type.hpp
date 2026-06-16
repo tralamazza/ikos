@@ -49,6 +49,7 @@
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SmallSet.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/DebugInfoMetadata.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
@@ -306,12 +307,18 @@ private:
   /// produce an ar::OpaqueType.
   ar::Type* translate_di_only(llvm::DIType* di_type);
 
-  /// \brief Look up the llvm::StructType corresponding to a DICompositeType
+  /// \brief Collect llvm::StructType candidates for a DICompositeType
   ///
-  /// Tries `struct.<name>`, `class.<name>`, `union.<name>`, then a
-  /// suffix-matching scan over the module's identified struct types. Returns
-  /// nullptr when no candidate matches.
-  llvm::StructType* lookup_struct_by_di(llvm::DICompositeType* di_type) const;
+  /// Appends every identified struct whose name (`struct.<name>`,
+  /// `class.<name>`, `union.<name>`, or a `.N`-suffixed variant) and total
+  /// size are compatible with \p di_type, in priority order. This is only a
+  /// cheap name + size pre-filter; it is deliberately permissive because
+  /// distinct same-named/same-sized types (template instantiations, Clang `.N`
+  /// shadow types) cannot be told apart by name and size alone. The caller
+  /// disambiguates by running the full two-sided translator on each candidate.
+  void candidate_structs_by_di(
+      llvm::DICompositeType* di_type,
+      llvm::SmallVectorImpl< llvm::StructType* >& out) const;
 
   /// \brief Translate (llvm::DICompositeType*, llvm::Type*) into an ar::Type
   ar::Type* translate_composite_di_type(llvm::DICompositeType*, llvm::Type*);
