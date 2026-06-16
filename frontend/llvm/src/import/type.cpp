@@ -723,6 +723,46 @@ ar::Type* TypeWithDebugInfoImporter::translate_di_only(
                                   static_cast< unsigned >(bits),
                                   ar::Unsigned);
     }
+    if (tag == dwarf::DW_TAG_array_type) {
+      // Recover an array pointee from DI alone, e.g. a pointer-to-array
+      // parameter `int p[][N]` (adjusted to `int(*)[N]`) whose opaque LLVM
+      // pointee hides the array. Without this the array DICompositeType falls
+      // through to OpaqueType and the pointer becomes `opaque*`, losing the
+      // inner bounds the analyzer needs.
+      ar::Type* element = this->translate_di_only(
+          llvm::cast_or_null< llvm::DIType >(comp->getRawBaseType()));
+      // An array of opaque is no more informative than opaque, and the element
+      // must be concrete to compute element offsets downstream.
+      if (!element->is_opaque() && comp->getRawElements() != nullptr) {
+        llvm::SmallVector< uint64_t, 4 > dims;
+        bool ok = true;
+        for (llvm::DINode* node : comp->getElements()) {
+          auto* subrange = llvm::dyn_cast< llvm::DISubrange >(node);
+          if (subrange == nullptr) {
+            ok = false;
+            break;
+          }
+          auto count = subrange->getCount();
+          if (count.is< llvm::ConstantInt* >() &&
+              !count.get< llvm::ConstantInt* >()->isNegative()) {
+            dims.push_back(count.get< llvm::ConstantInt* >()->getZExtValue());
+          } else {
+            // Unsized / dynamic dimension: model as a zero-length array.
+            dims.push_back(0);
+          }
+        }
+        if (ok && !dims.empty()) {
+          // DWARF lists dimensions outermost-first; build innermost-first.
+          ar::Type* ar_type = element;
+          for (auto it = dims.rbegin(), et = dims.rend(); it != et; ++it) {
+            ar_type =
+                ar::ArrayType::get(this->_context, ar_type, ar::ZNumber(*it));
+          }
+          return ar_type;
+        }
+      }
+      return ar::OpaqueType::create(this->_context);
+    }
     if (tag == dwarf::DW_TAG_structure_type ||
         tag == dwarf::DW_TAG_class_type ||
         tag == dwarf::DW_TAG_union_type) {
