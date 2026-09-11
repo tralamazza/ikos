@@ -339,6 +339,9 @@ ar::Function* BundleImporter::translate_intrinsic_function(
     }
     ar::Intrinsic::ID ar_id;
     switch (id) {
+    case llvm::Intrinsic::fmuladd:
+      ar_id = ar::Intrinsic::FloatFmuladd;
+      break;
     case llvm::Intrinsic::fma:
       ar_id = ar::Intrinsic::FloatFma;
       break;
@@ -373,8 +376,12 @@ ar::Function* BundleImporter::translate_intrinsic_function(
       ar_id = ar::Intrinsic::FloatCopysign;
       break;
     default:
-      ar_id = ar::Intrinsic::FloatFmuladd;
-      break;
+      // Unreachable: the enclosing `else if` admits exactly the 12 intrinsics
+      // cased above. This used to be `ar_id = ar::Intrinsic::FloatFmuladd`,
+      // which silently misclassified anything new added to that condition as a
+      // fused multiply-add -- a wrong-value bug rather than a crash. Keep the
+      // switch total over the outer condition and trap on drift between them.
+      ikos_unreachable("unhandled float llvm intrinsic");
     }
     ar_fun = this->_bundle->intrinsic_function(
         ar_id, ar::FloatType::get(_context, sem));
