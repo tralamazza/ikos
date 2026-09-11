@@ -1,0 +1,183 @@
+# Verbatim docstrings recovered from the six surviving .pyc files in
+# .auto/tools/__pycache__/ (Python 3.14 bytecode, extracted with marshal).
+# These are the only parts of the original validators that survived intact.
+# See README.md for what was reconstructed and what was not.
+
+============================================================================
+## fp_diff_check_nan_identity.cpython-314.pyc
+============================================================================
+
+Same-variable float comparison identities: `x P x` for all 14 IEEE predicates.
+
+Why hand-written LLVM IR rather than C. The analyzer's same-variable handler needs
+the AR to hold the SAME variable on both sides of the comparison. clang at -O0
+does not produce that shape for isnan(x): it lowers to two separate `load`
+instructions into two distinct SSA registers, so the operands are different
+variables and the handler cannot fire. Writing the IR directly tests the AR-level
+semantics that the handler actually implements.
+
+The identity table, derived from the IEEE-754 spellings where `u<pred>` means
+"unordered OR pred" and `o<pred>` means "ordered AND pred", plus the facts that
+x==x, x>=x and x<=x all hold whenever x is ordered while x<x and x>x never do:
+
+    une, uno, ult, ugt  <=>  x IS NaN
+    ord, oeq, oge, ole  <=>  x is NOT NaN
+    one, olt, ogt       =  always false   (needs ordered AND x != x)
+    ueq, ule, uge       =  always true   (ordered operands satisfy them)
+
+Each case builds a function whose parameter is split by `fcmp une x, x` into a
+NaN context and an ordered context, then asserts `x P x` inside one of them. The
+assert operand is a runtime zext, never a literal, so nothing is folded away.
+
+============================================================================
+## fp_diff_check_storage.cpython-314.pyc
+============================================================================
+
+Differential check over FP storage shapes: globals, static locals, recursion,
+computed array indices, and pointer accumulation.
+
+None of these had a dedicated validator. Earlier work covered locals, cells and
+structs, casts and intrinsics, but not the ways FP values live and travel through
+a larger program.
+
+Method: one program with one assertion per shape. Ground truth is obtained by
+EXECUTING the program with several concrete values for the nondeterministic
+input, including NaN, and recording whether any assertion fires. To attribute a
+violation to a SAFE assertion specifically, the unproven assertions are stripped
+out and the reduced program is executed: if it still fires, something IKOS called
+safe was violated.
+
+Two assertions are expected NOT to be provable, for different reasons worth
+recording:
+
+  * `s == x * 3.0` after `s = scale(x, 3.0)` is genuinely FALSE when x is NaN
+    (NaN*3 is NaN and NaN == NaN is false), so refusing it is correct, not
+    imprecise.
+  * `rec_sum(1.5, 4) == 6.0` is true but needs interprocedural constant folding
+    through recursion, which the analyzer does not do.
+
+============================================================================
+## fp_fuzz_casttree.cpython-314.pyc
+============================================================================
+
+Randomized soundness fuzzer over CAST-HEAVY FP expression trees.
+
+Run #87 fuzzed combined arithmetic + intrinsics but entirely in double, so it
+never exercised width. This one puts casts INSIDE the expression tree, mixing
+binary32 and binary64, because that is where the width lessons live:
+
+  * run #28  -- d = (double)0.1f must stay 0.100000001490116119384765625,
+                NOT truncate; a wrong-width narrowing silently changes the value
+  * run #54  -- fpext is exact (every binary32 value IS a binary64 value)
+  * run #55  -- fptrunc rounds, so interval bounds must go OUTWARD
+  * run #57  -- fptosi truncates toward zero, exact but range-limited
+  * run #75  -- a width-blind intrinsic name made any TU mixing fabsf+fabs abort
+
+All of those were validated one direction at a time. A tree like
+
+    (double)(float)(sqrt(x) * x) + (float)x
+
+stresses fpext, fptrunc, promotion and the intrinsic width rules together.
+
+Ground truth is C ITSELF, not a Python re-implementation (same choice as #87):
+each generated tree is compiled into a PRINT_VALUE variant and sampled at real
+points inside the guard. A sample is a real program value, so
+
+    IKOS proves `E P c` under the guard, and some sampled x violates E P c
+        => UNSOUND, with a concrete counterexample
+
+There is no false-positive direction. The converse ("tight therefore precise") is
+deliberately not claimed -- a sample set is not the whole guard region.
+
+UB avoidance: fptosi of an out-of-range float is undefined in C, so any int cast
+is wrapped in an explicit fmax/fmin clamp to a safe range. That keeps the sampled
+value meaningful while still exercising fptosi alongside fmax/fmin.
+
+============================================================================
+## fp_fuzz_cells.cpython-314.pyc
+============================================================================
+Randomized differential fuzzer for FP values in memory cells.
+
+Run #66 added FP tracking through memory cells and run #68 fixed a soundness bug
+in it (a discarded float resurrecting after an integer overwrite). The hand-built
+mirror matrix covered the cases I thought of; this covers the ones I did not.
+
+Oracle design: the generated programs are fully DETERMINISTIC, so running them on
+hardware gives the exact value of the expression under test. That makes the
+soundness test unambiguous:
+
+    IKOS proves  expr != <hardware value>   -> UNSOUND (contradicts the machine)
+    IKOS proves  expr == <hardware value>  -> sound and precise
+    IKOS proves neither                    -> sound but imprecise
+
+Any "definitely unsafe" verdict against the hardware value is a hard failure.
+
+Programs interleave writes of different types to the same storage (unions, struct
+fields, array elements) because that is where run #68's bug lived.
+
+Usage: .auto/tools/fp_fuzz_cells.py [iterations]
+
+============================================================================
+## fp_fuzz_fma_cast.cpython-314.pyc
+============================================================================
+
+Anti-overclaim fuzzer for CONTRACTED arithmetic combined with WIDTH CASTS.
+
+Why this exists. Run #48 established that `llvm.fmuladd` is a contraction HINT,
+not a guarantee: the backend may fuse (one rounding) or emit fmul+fadd (two
+roundings), and both are legal, so the IR does not determine the value. IKOS
+models that by assigning the HULL of both candidates. Run #55 separately
+established that fptrunc rounds, so its interval bounds must go outward.
+
+Those two rules have never been exercised together. A tree like
+
+    (float)(x * 3.0f) + (float)x
+
+puts a contractible multiply-add inside a narrowing cast. If the hull model were
+wrong -- say it collapsed to just the fused value -- this is where it would show.
+
+The test is stronger than sampling one build. We compile each generated expression
+TWICE:
+
+    variant C : default flags          -> clang emits llvm.fmuladd (may fuse)
+    variant N : -ffp-contract=off     -> definitely two roundings
+
+Both are legal instantiations of the same source. Let
+S = {C(x) : x in guard} U {N(x) : x in guard}.
+
+IKOS proves `E P c` only if it holds for EVERY legal value, so:
+
+    IKOS proves `E P c` and some member of S violates it  =>  UNSOUND
+
+Sampling only one build would test only one instantiation and could miss a hull
+that is too narrow. Sampling the union covers both. Ground truth is C ITSELF, so
+there is no rounding-model in our own evaluator to get wrong.
+
+Liveness is asserted, not assumed: the run reports how many x actually produced
+C(x) != N(x). If that count is zero the contraction never materialised and the
+test would be vacuous, so the validator fails loudly instead.
+
+============================================================================
+## fp_fuzz_nd.cpython-314.pyc
+============================================================================
+Randomized differential fuzzer over NONDETERMINISTIC, GUARDED FP expressions.
+
+fp_fuzz.py uses constant-valued locals, so constant propagation decides every case
+and the interval domain is barely exercised. This variant makes the operand unknown
+(`nd_double()`) and wraps the assertion in a random guard, so IKOS must actually
+do interval arithmetic and comparison-driven refinement -- which is where the
+interesting bugs live.
+
+Truth is a quantifier over sampled values that satisfy the guard:
+
+  * predicate fails for SOME sampled value  -> IKOS proving SAFE is UNSOUND
+  * predicate holds for EVERY sampled value -> IKOS reporting UNSAFE is a FALSE ERROR
+  * IKOS says UNPROVEN                     -> imprecision (allowed)
+
+Sampling uses a dense grid across the guard interval plus the guard endpoints, so
+"holds for all" is a strong empirical statement rather than a lucky few points.
+
+Usage: fp_fuzz_nd.py [iterations]   (default 120)
+
+Not part of the pinned benchmark -- a scratch soundness hunter.
+
