@@ -424,6 +424,21 @@ std::vector< NullDereferenceChecker::CheckResult > NullDereferenceChecker::
     case ar::Intrinsic::LibcppEndCatch: {
       return {};
     }
+    // Pure FP value computations: no pointer operand, nothing to dereference.
+    case ar::Intrinsic::FloatFmuladd:
+    case ar::Intrinsic::FloatFma:
+    case ar::Intrinsic::FloatAbs:
+    case ar::Intrinsic::FloatMaxnum:
+    case ar::Intrinsic::FloatMinnum:
+    case ar::Intrinsic::FloatFloor:
+    case ar::Intrinsic::FloatCeil:
+    case ar::Intrinsic::FloatTrunc:
+    case ar::Intrinsic::FloatRound:
+    case ar::Intrinsic::FloatRint:
+    case ar::Intrinsic::FloatCopysign:
+    case ar::Intrinsic::FloatSqrt: {
+      return {};
+    }
     default: {
       ikos_unreachable("unreachable");
     }

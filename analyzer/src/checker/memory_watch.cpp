@@ -364,6 +364,20 @@ void MemoryWatchChecker::check_intrinsic_call(
     case ar::Intrinsic::LibcppBeginCatch:
     case ar::Intrinsic::LibcppEndCatch: {
     } break;
+    // Pure FP value computations: no memory access, nothing to watch.
+    case ar::Intrinsic::FloatFmuladd:
+    case ar::Intrinsic::FloatFma:
+    case ar::Intrinsic::FloatAbs:
+    case ar::Intrinsic::FloatMaxnum:
+    case ar::Intrinsic::FloatMinnum:
+    case ar::Intrinsic::FloatFloor:
+    case ar::Intrinsic::FloatCeil:
+    case ar::Intrinsic::FloatTrunc:
+    case ar::Intrinsic::FloatRound:
+    case ar::Intrinsic::FloatRint:
+    case ar::Intrinsic::FloatCopysign:
+    case ar::Intrinsic::FloatSqrt: {
+    } break;
     default: {
       ikos_unreachable("unreachable");
     }
