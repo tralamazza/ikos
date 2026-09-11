@@ -315,7 +315,9 @@ ar::Function* BundleImporter::translate_intrinsic_function(
              id == llvm::Intrinsic::minnum || id == llvm::Intrinsic::floor ||
              id == llvm::Intrinsic::ceil || id == llvm::Intrinsic::trunc ||
              id == llvm::Intrinsic::sqrt || id == llvm::Intrinsic::round ||
-             id == llvm::Intrinsic::rint || id == llvm::Intrinsic::copysign) {
+             id == llvm::Intrinsic::rint || id == llvm::Intrinsic::copysign ||
+             id == llvm::Intrinsic::log || id == llvm::Intrinsic::log2 ||
+             id == llvm::Intrinsic::log10 || id == llvm::Intrinsic::pow) {
     // All polymorphic: the operand type decides the AR signature, so carry it
     // through to the call site. They are NOT interchangeable -- fma is always
     // fused, fmuladd only may be, fabs is a different operation entirely,
@@ -375,8 +377,20 @@ ar::Function* BundleImporter::translate_intrinsic_function(
     case llvm::Intrinsic::copysign:
       ar_id = ar::Intrinsic::FloatCopysign;
       break;
+    case llvm::Intrinsic::log:
+      ar_id = ar::Intrinsic::FloatLog;
+      break;
+    case llvm::Intrinsic::log2:
+      ar_id = ar::Intrinsic::FloatLog2;
+      break;
+    case llvm::Intrinsic::log10:
+      ar_id = ar::Intrinsic::FloatLog10;
+      break;
+    case llvm::Intrinsic::pow:
+      ar_id = ar::Intrinsic::FloatPow;
+      break;
     default:
-      // Unreachable: the enclosing `else if` admits exactly the 12 intrinsics
+      // Unreachable: the enclosing `else if` admits exactly the 16 intrinsics
       // cased above. This used to be `ar_id = ar::Intrinsic::FloatFmuladd`,
       // which silently misclassified anything new added to that condition as a
       // fused multiply-add -- a wrong-value bug rather than a crash. Keep the

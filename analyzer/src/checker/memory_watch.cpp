@@ -376,7 +376,11 @@ void MemoryWatchChecker::check_intrinsic_call(
     case ar::Intrinsic::FloatRound:
     case ar::Intrinsic::FloatRint:
     case ar::Intrinsic::FloatCopysign:
-    case ar::Intrinsic::FloatSqrt: {
+    case ar::Intrinsic::FloatSqrt:
+    case ar::Intrinsic::FloatLog:
+    case ar::Intrinsic::FloatLog2:
+    case ar::Intrinsic::FloatLog10:
+    case ar::Intrinsic::FloatPow: {
     } break;
     default: {
       ikos_unreachable("unreachable");

@@ -1839,6 +1839,361 @@ private:
     this->_inv.normal().float_assign_interval(ret.var(), out);
   }
 
+  /// \brief Base selector shared by llvm.log, llvm.log2 and llvm.log10.
+  enum class LogBase { Nat, Two, Ten };
+
+  /// \brief Machine value of log_base(v) at the operand's own width.
+  ///
+  /// This is the value the program itself computes, which is what the domain
+  /// tracks: the branch models IEEE machine values, not ideal reals, the same
+  /// way `0.1 + 0.2` is held as 0x1.3333333333334p-2 rather than 0.3.
+  static FloatingPoint log_point(const FloatingPoint& v, LogBase base) {
+    if (v.bit_width() == 32) {
+      float x = v.to_float();
+      float r = (base == LogBase::Nat)
+                    ? std::log(x)
+                    : ((base == LogBase::Two) ? std::log2(x) : std::log10(x));
+      return FloatingPoint::from_float(r);
+    }
+    double x = v.to_double();
+    double r = (base == LogBase::Nat)
+                   ? std::log(x)
+                   : ((base == LogBase::Two) ? std::log2(x) : std::log10(x));
+    return FloatingPoint::from_double(r);
+  }
+
+  /// \brief Is `v` an exact power of two?
+  ///
+  /// Bit test, not a round trip: log2 of a positive normal power of two is an
+  /// exact integer, so that bound needs no widening. Mantissa zero, exponent
+  /// neither zero (subnormal/zero) nor all-ones (inf/NaN), sign positive.
+  static bool is_exact_pow2(double v) {
+    if (!(v > 0.0) || !std::isfinite(v)) {
+      return false;
+    }
+    return (FloatingPoint::from_double(v).bits() & 0x000FFFFFFFFFFFFFULL) == 0;
+  }
+
+  /// \brief Is `v` an exact power of ten?
+  ///
+  /// 10^k = 2^k * 5^k is representable only while 5^k fits the 53-bit
+  /// significand, which caps k at 22; negative k would need 1/5^k to be a
+  /// dyadic rational, which it never is. So the whole candidate set is
+  /// 10^0..10^22 and each step is exact.
+  static bool is_exact_pow10(double v) {
+    if (!(v >= 1.0) || !std::isfinite(v)) {
+      return false;
+    }
+    double p = 1.0;
+    for (int k = 0; k <= 22; ++k) {
+      if (FloatingPoint::from_double(p).bits() ==
+          FloatingPoint::from_double(v).bits()) {
+        return true;
+      }
+      p *= 10.0;
+    }
+    return false;
+  }
+
+  /// \brief Is log_base(v) exactly representable?
+  ///
+  /// Drives whether a bound has to be widened. For base e the only exact
+  /// finite case is v == 1 giving 0: by Lindemann-Weierstrass e^a is
+  /// transcendental for nonzero algebraic a, so log of any other algebraic
+  /// value is irrational and cannot land on a machine number.
+  static bool log_is_exact(double v, LogBase base) {
+    // log_b(1) == 0 exactly for every base, and for base e that is the only
+    // exact finite value: by Lindemann-Weierstrass e^a is transcendental for
+    // nonzero algebraic a, so the log of any other algebraic value is
+    // irrational and cannot land on a machine number.
+    //
+    // Compared on bit patterns rather than with `==` so -Wfloat-equal stays
+    // satisfied, matching how the rest of this file handles exact float tests.
+    if (FloatingPoint::from_double(v).bits() ==
+        FloatingPoint::from_double(1.0).bits()) {
+      return true;
+    }
+    if (base == LogBase::Two) {
+      return is_exact_pow2(v);
+    }
+    if (base == LogBase::Ten) {
+      return is_exact_pow10(v);
+    }
+    return false;
+  }
+
+  /// \brief One end of the log image of an interval, widened outward unless
+  /// the value is provably exact.
+  ///
+  /// Widening is what keeps the bound sound against libm being off by an ulp
+  /// or the host and target disagreeing, mirroring the outward round in
+  /// sqrt_image_outward. Skipping it for exact results is what keeps
+  /// `log(1) == 0` and `log2(2) == 1` from degrading into a denormal or an
+  /// off-by-one bound -- without that, `x in [1,2] -> log(x) >= 0` fails
+  /// because nextafter(0.0, -inf) is a tiny negative denormal.
+  static FloatingPoint log_bound(const FloatingPoint& v, LogBase base, bool up) {
+    FloatingPoint r = log_point(v, base);
+    if (r.is_nan() || r.is_inf()) {
+      return r;
+    }
+    if (log_is_exact(v.to_double(), base)) {
+      return r;
+    }
+    if (v.bit_width() == 32) {
+      return FloatingPoint::from_float(std::nextafterf(
+          r.to_float(), up ? std::numeric_limits<float>::infinity()
+                          : -std::numeric_limits<float>::infinity()));
+    }
+    return FloatingPoint::from_double(std::nextafter(
+        r.to_double(), up ? std::numeric_limits<double>::infinity()
+                         : -std::numeric_limits<double>::infinity()));
+  }
+
+  /// \brief Execute llvm.log, llvm.log2 or llvm.log10.
+  ///
+  /// All three are monotonically increasing on (0, inf), so the ordered image
+  /// of a positive interval is just [log(lo), log(hi)].
+  ///
+  /// The NaN boundary is the part that matters. log(x) is NaN for every x < 0,
+  /// so an interval lying entirely below zero gives a result that is
+  /// DEFINITELY NaN. That is carried as an empty ordered range with may_nan
+  /// set -- the shape Interval::point(NaN) produces and is_definitely_nan()
+  /// recognises -- which lets the prover discharge isnan() and refute !isnan()
+  /// instead of topping out and knowing nothing.
+  ///
+  /// log(+0) is -inf; the ordered range carries that rather than treating it
+  /// as an error.
+  void exec_float_log(ar::CallBase* call, LogBase base) {
+    ikos_assert(call->has_result());
+    ikos_assert(call->num_arguments() == 1);
+
+    const ScalarLit& ret = this->_lit_factory.get_scalar(call->result());
+    if (!ret.is_floating_point_var()) {
+      return;
+    }
+
+    const ScalarLit& la = this->_lit_factory.get_scalar(call->argument(0));
+
+    // Constant operand: evaluate exactly at the operand width, the same way
+    // exec_float_sqrt does. This is the path that makes isnan(log(-2.0))
+    // provable rather than merely unprovable -- float_assign_cst routes a NaN
+    // result through Interval::point, which yields definitely-NaN.
+    if (const FloatingPoint* v = this->fp_value(la)) {
+      if (!v->is_modeled() ||
+          (v->bit_width() != 32 && v->bit_width() != 64)) {
+        this->_inv.normal().float_assign_nondet(ret.var());
+        return;
+      }
+      if (v->bit_width() == 32) {
+        float x = v->to_float();
+        float r = (base == LogBase::Nat)
+                      ? std::log(x)
+                      : ((base == LogBase::Two) ? std::log2(x) : std::log10(x));
+        this->_inv.normal().float_assign_cst(ret.var(),
+                                           FloatingPoint::from_float(r));
+      } else {
+        double x = v->to_double();
+        double r = (base == LogBase::Nat)
+                       ? std::log(x)
+                       : ((base == LogBase::Two) ? std::log2(x) : std::log10(x));
+        this->_inv.normal().float_assign_cst(ret.var(),
+                                           FloatingPoint::from_double(r));
+      }
+      return;
+    }
+
+    auto iv = this->fp_interval(la);
+    if (!iv.has_value() || iv->is_empty()) {
+      this->_inv.normal().float_assign_nondet(ret.var());
+      return;
+    }
+    if (!iv->lo.is_modeled() || !iv->hi.is_modeled() ||
+        (iv->lo.bit_width() != 32 && iv->lo.bit_width() != 64)) {
+      this->_inv.normal().float_assign_nondet(ret.var());
+      return;
+    }
+
+    const uint16_t bw = iv->lo.bit_width();
+    const double lo_d = iv->lo.to_double();
+    const double hi_d = iv->hi.to_double();
+
+    if (hi_d < 0.0) {
+      // Every input is negative, so every result is NaN: empty ordered range,
+      // may_nan set. Width-matched infinities keep lo > hi so that
+      // ordered_empty() holds, which is what makes this definitely-NaN rather
+      // than merely possibly-NaN.
+      FloatingPoint pinf = (bw == 32)
+                              ? FloatingPoint::from_float(
+                                    std::numeric_limits<float>::infinity())
+                              : FloatingPoint::from_double(
+                                    std::numeric_limits<double>::infinity());
+      FloatingPoint ninf = (bw == 32)
+                              ? FloatingPoint::from_float(
+                                    -std::numeric_limits<float>::infinity())
+                              : FloatingPoint::from_double(
+                                    -std::numeric_limits<double>::infinity());
+      this->_inv.normal().float_assign_interval(
+          ret.var(), core::floating_point::Interval{pinf, ninf, true});
+      return;
+    }
+
+    // Straddling zero: the negative part yields NaN, and the ordered part is
+    // the image of the non-negative portion, so clamp the low end at +0.0.
+    bool nan_out = iv->may_nan || (lo_d < 0.0);
+    FloatingPoint lo =
+        (lo_d < 0.0) ? FloatingPoint::from_bits(bw, 0) : iv->lo;
+
+    FloatingPoint out_lo = log_bound(lo, base, /* up = */ false);
+    FloatingPoint out_hi = log_bound(iv->hi, base, /* up = */ true);
+
+    core::floating_point::Interval out{out_lo, out_hi, nan_out};
+    if (out.is_empty()) {
+      this->_inv.normal().float_assign_nondet(ret.var());
+      return;
+    }
+    this->_inv.normal().float_assign_interval(ret.var(), out);
+  }
+
+  /// \brief Execute llvm.pow.
+  ///
+  /// Two things make this harder than the monotone functions above.
+  ///
+  /// NaN depends on BOTH operands: pow(x, y) is NaN when x < 0 and y is not
+  /// an integer. Corners alone cannot see this -- with x in [-1, 1] and y in
+  /// [2, 3] every corner is ordered, yet x = -1 with y = 2.5 is NaN. So on
+  /// top of the corner scan, a base that can go negative forces may_nan unless
+  /// the exponent is a point holding an integer.
+  ///
+  /// Monotonicity depends on the exponent's sign: x**y increases in x when
+  /// y > 0 and decreases when y < 0. The ordered hull is therefore taken over
+  /// all four corners rather than assumed to be [pow(lo,lo), pow(hi,hi)].
+  ///
+  /// All-corners-NaN is deliberately NOT read as definitely-NaN: as the
+  /// [2, 3] example shows, ordered interior values can survive it. That case
+  /// tops out instead.
+  void exec_float_pow(ar::CallBase* call) {
+    ikos_assert(call->has_result());
+    ikos_assert(call->num_arguments() == 2);
+
+    const ScalarLit& ret = this->_lit_factory.get_scalar(call->result());
+    if (!ret.is_floating_point_var()) {
+      return;
+    }
+
+    const ScalarLit& lb = this->_lit_factory.get_scalar(call->argument(0));
+    const ScalarLit& le = this->_lit_factory.get_scalar(call->argument(1));
+
+    // Both operands constant: exact, and NaN shows up as a NaN constant.
+    if (const FloatingPoint* xb = this->fp_value(lb)) {
+      const FloatingPoint* ye = this->fp_value(le);
+      if (xb->is_modeled() && ye != nullptr && ye->is_modeled() &&
+          xb->bit_width() == ye->bit_width() &&
+          (xb->bit_width() == 32 || xb->bit_width() == 64)) {
+        if (xb->bit_width() == 32) {
+          this->_inv.normal().float_assign_cst(
+              ret.var(),
+              FloatingPoint::from_float(std::pow(xb->to_float(),
+                                               ye->to_float())));
+        } else {
+          this->_inv.normal().float_assign_cst(
+              ret.var(),
+              FloatingPoint::from_double(std::pow(xb->to_double(),
+                                                ye->to_double())));
+        }
+        return;
+      }
+    }
+
+    auto ia = this->fp_interval(lb);
+    auto ib = this->fp_interval(le);
+    if (!ia.has_value() || !ib.has_value() || ia->is_empty() || ib->is_empty()) {
+      this->_inv.normal().float_assign_nondet(ret.var());
+      return;
+    }
+    if (!ia->lo.is_modeled() || !ia->hi.is_modeled() ||
+        !ib->lo.is_modeled() || !ib->hi.is_modeled() ||
+        (ia->lo.bit_width() != 32 && ia->lo.bit_width() != 64)) {
+      this->_inv.normal().float_assign_nondet(ret.var());
+      return;
+    }
+
+    const double xlos[] = {ia->lo.to_double(), ia->hi.to_double()};
+    const double ylos[] = {ib->lo.to_double(), ib->hi.to_double()};
+
+    bool any_ordered = false;
+    bool any_nan_corner = false;
+    double hlo = 0.0;
+    double hhi = 0.0;
+    for (double x : xlos) {
+      for (double y : ylos) {
+        double r = std::pow(x, y);
+        if (std::isnan(r)) {
+          any_nan_corner = true;
+          continue;
+        }
+        if (!any_ordered) {
+          hlo = r;
+          hhi = r;
+          any_ordered = true;
+        } else {
+          hlo = std::min(hlo, r);
+          hhi = std::max(hhi, r);
+        }
+      }
+    }
+
+    // A negative base with a non-integral exponent is NaN even when no corner
+    // shows it, so widen may_nan here rather than trusting the corner scan.
+    // Integrality is tested on bit patterns -- floor() of an integral double
+    // is that same double, so equal bits means no fractional part -- which
+    // keeps -Wfloat-equal satisfied the way the rest of this file does.
+    const double e_d = ib->lo.to_double();
+    bool exp_is_integral_point =
+        (ib->lo.bits() == ib->hi.bits()) && std::isfinite(e_d) &&
+        (FloatingPoint::from_double(std::floor(e_d)).bits() ==
+         FloatingPoint::from_double(e_d).bits());
+    bool nan_out = ia->may_nan || ib->may_nan || any_nan_corner ||
+                  ((ia->lo.to_double() < 0.0) && !exp_is_integral_point);
+
+    if (!any_ordered) {
+      // Nothing to bound the ordered part with. Top out -- but do NOT read
+      // all-NaN corners as definitely-NaN; interior ordered values can exist.
+      this->_inv.normal().float_assign_nondet(ret.var());
+      return;
+    }
+
+    // Widen the corner hull by one ulp outward to absorb the rounding of each
+    // corner evaluation and any interior value the corners did not attain.
+    //
+    // Unlike log there is no cheap exactness test here, so `x in [2,3] ->
+    // pow(x,2) >= 4` is not provable: pow(2,2) is exactly 4.0 but the hull
+    // is pushed to 3.9999999999999996. That is sound, just not tight. The
+    // log path avoids it because powers of the base are decidable from bits;
+    // exactness of a general a**b is not, without carrying an error term the
+    // way Fluctuat does.
+    const uint16_t bw = ia->lo.bit_width();
+    if (bw == 32) {
+      float l = std::nextafterf(static_cast<float>(hlo),
+                               -std::numeric_limits<float>::infinity());
+      float h = std::nextafterf(static_cast<float>(hhi),
+                               std::numeric_limits<float>::infinity());
+      this->_inv.normal().float_assign_interval(
+          ret.var(),
+          core::floating_point::Interval{
+              FloatingPoint::from_float(l), FloatingPoint::from_float(h),
+              nan_out});
+    } else {
+      double l =
+          std::nextafter(hlo, -std::numeric_limits<double>::infinity());
+      double h = std::nextafter(hhi, std::numeric_limits<double>::infinity());
+      this->_inv.normal().float_assign_interval(
+          ret.var(),
+          core::floating_point::Interval{
+              FloatingPoint::from_double(l), FloatingPoint::from_double(h),
+              nan_out});
+    }
+  }
+
   /// \brief Execute llvm.copysign.
   ///
   /// Magnitude comes from `a`, the sign bit comes from `b`. The magnitude image
@@ -3456,6 +3811,18 @@ public:
       } break;
       case ar::Intrinsic::FloatSqrt: {
         this->exec_float_sqrt(call);
+      } break;
+      case ar::Intrinsic::FloatLog: {
+        this->exec_float_log(call, LogBase::Nat);
+      } break;
+      case ar::Intrinsic::FloatLog2: {
+        this->exec_float_log(call, LogBase::Two);
+      } break;
+      case ar::Intrinsic::FloatLog10: {
+        this->exec_float_log(call, LogBase::Ten);
+      } break;
+      case ar::Intrinsic::FloatPow: {
+        this->exec_float_pow(call);
       } break;
       case ar::Intrinsic::FloatRound: {
         this->exec_float_round(call, RoundMode::HalfAway);

@@ -107,6 +107,17 @@ public:
     /// Roots are generally not representable, so the interval image needs
     /// outward rounding.
     FloatSqrt,
+    /// llvm.log / llvm.log2 / llvm.log10: natural, base-2 and base-10
+    /// logarithm. Monotonically increasing on (0, inf). log of a negative
+    /// argument is NaN and log(+0) is -inf, so an interval reaching below
+    /// zero makes the result possibly NaN.
+    FloatLog,
+    FloatLog2,
+    FloatLog10,
+    /// llvm.pow: base ** exponent. NaN whenever the base is negative and the
+    /// exponent is not an integer, so unlike the monotone functions above the
+    /// NaN condition depends on BOTH operands.
+    FloatPow,
     BeginIkosIntrinsic,
     // <ikos/analyzer/intrinsic.h>
     IkosAssert,

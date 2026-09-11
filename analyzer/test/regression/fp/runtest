@@ -58,4 +58,34 @@ if __name__ == '__main__':
                          (28, 'error'),
                          (34, 'warning')]))
 
+    # --- 4. log / pow NaN and range semantics ------------------------------
+    # The four intrinsics added on top of bc915ee. Pinned line by line because
+    # the interesting half of each pair is the REFUTATION: a model that simply
+    # returned top would leave every assertion unproven and still look clean.
+    # The `error` lines are what prove the model actually says something.
+    t.add(Test('test-log-pow.c', 'log/pow NaN and range', 'prover', 'error',
+              line_checks=[
+                  # NaN production from constants
+                  (49, 'ok'),   # isnan(log(-2.0))
+                  (50, 'ok'),   # isnan(log2(-2.0))
+                  (51, 'ok'),   # isnan(log10(-2.0))
+                  (52, 'ok'),   # isnan(pow(-2.0, 0.5))
+                  # ...and its refutation
+                  (57, 'ok'),   # !isnan(log(2.0))
+                  (58, 'error'),  # isnan(log(2.0))
+                  # ordered image, exact at the base-power boundary
+                  (64, 'ok'),   # log(a) >= 0.0   for a in [1,2]
+                  (65, 'error'),  # log(a) >= 1.0
+                  (69, 'ok'),   # log2(b) >= 1.0  for b in [2,8]
+                  (70, 'error'),  # log2(b) >= 5.0
+                  (74, 'ok'),   # log10(c) >= 2.0 for c in [100,1000]
+                  (75, 'error'),  # log10(c) >= 5.0
+                  # NaN through an interval rather than a constant
+                  (81, 'ok'),   # isnan(log(n)) for n in [-5,-1]
+                  (85, 'warning'),  # !isnan(log(s)) for s straddling 0
+                  (89, 'ok'),   # !isnan(log(p)) for p in [1,2]
+                  # pow: NaN needs both operands, corners alone are not enough
+                  (99, 'warning'),  # !isnan(pow(q, qy)) q in [-1,1] y in [2,3]
+                  ]))
+
     t.run()

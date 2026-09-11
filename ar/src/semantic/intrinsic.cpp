@@ -197,6 +197,21 @@ FunctionType* Intrinsic::type(Bundle* bundle, ID id, Type* template_ty) {
       ret_ty = template_ty;          // ret
       params.push_back(template_ty); // operand
     } break;
+    case FloatLog:
+    case FloatLog2:
+    case FloatLog10: {
+      // (T) -> T, same unary shape as sqrt.
+      ikos_assert(template_ty != nullptr);
+      ret_ty = template_ty;          // ret
+      params.push_back(template_ty); // operand
+    } break;
+    case FloatPow: {
+      // (T, T) -> T: base and exponent share the float type.
+      ikos_assert(template_ty != nullptr);
+      ret_ty = template_ty;          // ret
+      params.push_back(template_ty); // base
+      params.push_back(template_ty); // exponent
+    } break;
     // <ikos/analyzer/intrinsic.h>
     case IkosAssert: {
       ret_ty = void_ty;          // ret
@@ -706,6 +721,14 @@ std::string Intrinsic::short_name(ID id, Type* template_ty) {
       return "float.copysign." + template_type_name(template_ty);
     case FloatSqrt:
       return "float.sqrt." + template_type_name(template_ty);
+    case FloatLog:
+      return "float.log." + template_type_name(template_ty);
+    case FloatLog2:
+      return "float.log2." + template_type_name(template_ty);
+    case FloatLog10:
+      return "float.log10." + template_type_name(template_ty);
+    case FloatPow:
+      return "float.pow." + template_type_name(template_ty);
     // <ikos/analyzer/intrinsic.h>
     case IkosAssert:
       return "ikos.assert";
