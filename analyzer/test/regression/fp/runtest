@@ -1,0 +1,61 @@
+#!/usr/bin/env python
+################################################################################
+# Regression tests for floating-point support.
+#
+# Two distinct jobs live here:
+#
+#   1. test-intrinsics-no-crash.c -- the analyzer must TERMINATE on math.h
+#      intrinsics. bc915ee added the 12 Float* intrinsic IDs but left them out
+#      of the exhaustive switches in boa / nullity / sound / watch, each of
+#      which ends in ikos_unreachable, so every math.h program trapped with
+#      SIGTRAP. Verified load-bearing: reverting any one of those four fixes
+#      makes the matching test below exit 133 and FAIL.
+#
+#   2. test-rounding.c / test-f2i-tiers.c -- the FP semantics themselves.
+#
+# The `sound` entries are 'unsafe' only because the checker reports the extern
+# __ikos_nondet_* calls as ignored side effects. That is unrelated to FP and is
+# why the no-crash assertions are split per-checker rather than lumped together.
+################################################################################
+import os.path
+import sys
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
+sys.dont_write_bytecode = True
+from libruntest import TestManager, Test, parse_args
+
+if __name__ == '__main__':
+    parse_args(description='Regression tests for floating-point support')
+
+    t = TestManager(root=current_dir)
+
+    # --- 1. Intrinsic dispatch: the analyzer must not trap ------------------
+    # Each of these four checkers trapped before the fix. Run each on its own so
+    # a regression names the checker that broke.
+    t.add(Test('test-intrinsics-no-crash.c', 'intrinsics vs buffer-overflow',
+              'boa', 'safe'))
+    t.add(Test('test-intrinsics-no-crash.c', 'intrinsics vs null-dereference',
+              'nullity', 'safe'))
+    t.add(Test('test-intrinsics-no-crash.c', 'intrinsics vs memory-watch',
+              'watch', 'safe'))
+    t.add(Test('test-intrinsics-no-crash.c', 'intrinsics vs soundness',
+              'sound', 'unsafe'))
+    t.add(Test('test-intrinsics-no-crash.c', 'intrinsics vs all four at once',
+              ['boa', 'nullity', 'sound', 'watch'], 'unsafe'))
+
+    # --- 2. IEEE-754 rounding ---------------------------------------------
+    t.add(Test('test-rounding.c', 'binary rounding is not real arithmetic',
+              'prover', 'safe'))
+
+    # --- 3. f2i overflow tiers --------------------------------------------
+    # line 23 warning  unguarded cast, might overflow (was silent)
+    # line 28 error    x >= 1e10 always overflows
+    # line 34 warning  x <= 1e300, unbounded below
+    # lines 41, 47 emit no check at all: proven in range
+    t.add(Test('test-f2i-tiers.c', 'float-to-int tiers', 'f2i', 'error',
+              line_checks=[(23, 'warning'),
+                         (28, 'error'),
+                         (34, 'warning')]))
+
+    t.run()

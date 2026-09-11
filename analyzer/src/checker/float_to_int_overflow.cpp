@@ -195,7 +195,28 @@ FloatToIntOverflowChecker::check_conversion(ar::UnaryOperation* stmt,
   if (lit.is_floating_point_var()) {
     const core::floating_point::Interval* iv =
         inv.normal().float_get_interval(lit.var());
-    if (iv != nullptr && !iv->is_empty() && !iv->may_nan) {
+    // An untracked variable has no map entry, so get_interval() returns nullptr.
+    // That is TOP -- anything is possible -- not "nothing to say". Treat it as
+    // such so the analysis below actually runs on it.
+    core::floating_point::Interval const top =
+        core::floating_point::Interval::top_value();
+    if (iv == nullptr) {
+      iv = &top;
+    }
+    // NaN-ness and overflow-ness are ORTHOGONAL questions. The gate here used to
+    // be `!iv->is_empty() && !iv->may_nan`, which threw away every ordered bound
+    // as soon as NaN was possible. A nondeterministic double always has
+    // may_nan == true, so the single most dangerous cast in real code -- an
+    // unguarded `(int)x` on an externally-sourced double -- produced ZERO
+    // checks, while strictly-less-informative one-sided bounds such as
+    // `x <= 1e300` already warned. Top being quieter than a partial bound is
+    // backwards.
+    //
+    // The ordered range alone bounds the converted magnitude, so analyse it
+    // regardless of may_nan. If the ordered range is EMPTY then every value is
+    // NaN: that is the "undefined conversion" case the constant path above
+    // deliberately does not report, so it stays skipped.
+    if (!iv->ordered_empty()) {
       double tlo = trunc_bound(iv->lo);
       double thi = trunc_bound(iv->hi);
 
@@ -204,10 +225,21 @@ FloatToIntOverflowChecker::check_conversion(ar::UnaryOperation* stmt,
       double lo = is_signed ? -hi : 0.0;
 
       if (tlo >= hi || thi < lo) {
-        if (auto msg = this->display_check(Result::Error, stmt)) {
-          *msg << "float to int overflow: every value in the interval overflows\n";
+        // Every ORDERED value overflows. Claim a definite error only when NaN is
+        // impossible; if NaN is also possible the program is definitely broken
+        // but the cause is ambiguous, so warn rather than overstate.
+        if (!iv->may_nan) {
+          if (auto msg = this->display_check(Result::Error, stmt)) {
+            *msg << "float to int overflow: every value in the interval "
+                    "overflows\n";
+          }
+          return CheckResult{CheckKind::FloatToIntOverflow, Result::Error, {}};
         }
-        return CheckResult{CheckKind::FloatToIntOverflow, Result::Error, {}};
+        if (auto msg = this->display_check(Result::Warning, stmt)) {
+          *msg << "float to int overflow: every ordered value overflows, and "
+                  "NaN is also possible\n";
+        }
+        return CheckResult{CheckKind::FloatToIntOverflow, Result::Warning, {}};
       }
 
       // The interval straddles a range edge: some values convert cleanly and some
