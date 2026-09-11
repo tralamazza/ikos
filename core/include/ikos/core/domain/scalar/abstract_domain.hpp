@@ -47,6 +47,7 @@
 #include <ikos/core/domain/machine_int/operator.hpp>
 #include <ikos/core/domain/pointer/operator.hpp>
 #include <ikos/core/linear_expression.hpp>
+#include <ikos/core/number/floating_point.hpp>
 #include <ikos/core/number/machine_int.hpp>
 #include <ikos/core/semantic/machine_int/variable.hpp>
 #include <ikos/core/semantic/memory_location.hpp>
@@ -63,6 +64,10 @@
 
 namespace ikos {
 namespace core {
+
+namespace floating_point {
+struct Interval;
+} // end namespace floating_point
 namespace scalar {
 
 /// \brief Base class for scalar abstract domains
@@ -296,11 +301,39 @@ public:
   /// \brief Assign `x` to a non deterministic floating point
   virtual void float_assign_nondet(VariableRef x) = 0;
 
+  /// \brief Assign `x = cst`
+  ///
+  /// If `cst` is not a modeled width the value becomes unknown, not wrong.
+  virtual void float_assign_cst(VariableRef x, const FloatingPoint& cst) = 0;
+
+  /// \brief Get the known constant value of `x`, or nullptr if unknown
+  virtual const FloatingPoint* float_get_cst(VariableRef x) const = 0;
+
   /// \brief Assign `x = y`
   virtual void float_assign(VariableRef x, VariableRef y) = 0;
 
   /// \brief Forget a floating point variable
   virtual void float_forget(VariableRef x) = 0;
+
+  /// \brief Set `x` to a known interval
+  virtual void float_assign_interval(VariableRef x, const core::floating_point::Interval& iv) = 0;
+
+  /// \brief Get the known interval for `x`, or nullptr if nothing is known
+  virtual const core::floating_point::Interval* float_get_interval(VariableRef x) const = 0;
+
+  /// \brief Constrain `x` by `x pred cst`
+  ///
+  /// Narrows the stored interval. Sets the value to bottom when the constraint
+  /// cannot be satisfied. Over-approximates where an interval cannot express the
+  /// constraint exactly, which is the sound direction.
+  virtual void float_add(IEEEPredicate pred,
+                        VariableRef x,
+                        const FloatingPoint& cst) = 0;
+
+  /// \brief Constrain `x` by `cst pred x`
+  virtual void float_add(IEEEPredicate pred,
+                        const FloatingPoint& cst,
+                        VariableRef x) = 0;
 
   /// @}
   /// \name Nullity abstract domain methods
@@ -432,6 +465,16 @@ public:
   /// \brief Write a non deterministic float to a dynamically typed variable
   virtual void dynamic_write_nondet_float(VariableRef x) = 0;
 
+  /// \brief Write a float to a dynamically typed variable
+  ///
+  /// The width travels with the value: `FloatingPoint` carries its own
+  /// `bit_width()`, so no float width trait is needed on the variable. An
+  /// unmodeled width tops the cell rather than storing a wrong value.
+  virtual void dynamic_write_float(VariableRef x, const FloatingPoint& f) = 0;
+
+  /// \brief Write a float variable to a dynamically typed variable
+  virtual void dynamic_write_float(VariableRef x, VariableRef y) = 0;
+
   /// \brief Write null to a dynamically typed variable
   virtual void dynamic_write_null(VariableRef x) = 0;
 
@@ -445,6 +488,12 @@ public:
 
   /// \brief Read an integer variable from a dynamically typed variable
   virtual void dynamic_read_int(VariableRef x, VariableRef y) = 0;
+
+  /// \brief Read a float variable from a dynamically typed variable
+  ///
+  /// `x` is the destination, `y` the dynamically typed source cell. Mirrors
+  /// `dynamic_read_int`.
+  virtual void dynamic_read_float(VariableRef x, VariableRef y) = 0;
 
   /// \brief Read a pointer variable from a dynamically typed variable
   virtual void dynamic_read_pointer(VariableRef x, VariableRef y) = 0;

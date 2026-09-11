@@ -115,6 +115,7 @@ class CheckKind:
     FUNCTION_CALL = auto()
     _END_FUNCTION_CALL = auto()
     FREE = auto()
+    FLOAT_TO_INT_OVERFLOW = auto()
 
     SHORT_NAME_LIST = [
         'unreachable',
@@ -157,6 +158,7 @@ class CheckKind:
         'function-call',
         'end-function-call',
         'free',
+        'float-to-int-overflow',
     ]
 
     @classmethod
@@ -204,6 +206,7 @@ class CheckKind:
         'function call',
         'end function call',
         'free',
+        'float to int overflow',
     ]
 
     @classmethod
@@ -229,6 +232,7 @@ class CheckerName:
     DOUBLE_FREE = auto()
     DEBUG = auto()
     MEMORY_WATCH = auto()
+    FLOAT_TO_INT_OVERFLOW = auto()
 
     SHORT_NAME_LIST = [
         'boa',
@@ -248,6 +252,7 @@ class CheckerName:
         'dfa',
         'dbg',
         'watch',
+        'f2i',
     ]
     SHORT_NAME_MAP = {v: k for k, v in enumerate(SHORT_NAME_LIST)}
 

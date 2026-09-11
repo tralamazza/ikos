@@ -72,6 +72,41 @@ public:
     LifetimeEnd,
     EhTypeidFor,
     Trap,
+    /// llvm.fmuladd: a*b+c that the backend MAY fuse. This is a contraction
+    /// hint, not a guarantee -- the backend may instead emit a separate fmul
+    /// and fadd, which rounds twice and yields a different number. Both
+    /// outcomes are legal, so the value is not fully determined.
+    FloatFmuladd,
+    /// llvm.fma: the strict IEEE fused multiply-add. Always exactly one
+    /// rounding, so the result is determined.
+    FloatFma,
+    /// llvm.fabs: magnitude. Clears the sign bit, so it is exact at every
+    /// width and never rounds.
+    FloatAbs,
+    /// llvm.maxnum / llvm.minnum: IEEE-754 maxNum and minNum. Note these do
+    /// NOT propagate NaN -- if exactly one operand is NaN the other, non-NaN
+    /// operand is returned. That asymmetry is what makes the interval rule
+    /// differ from a plain min/max, so they are modelled explicitly.
+    FloatMaxnum,
+    FloatMinnum,
+    /// llvm.floor / llvm.ceil / llvm.trunc: round to an integer-valued float.
+    /// All three are monotonically non-decreasing and return exactly
+    /// representable integers, so their interval image is exact.
+    FloatFloor,
+    FloatCeil,
+    FloatTrunc,
+    /// llvm.round (half away from zero) and llvm.rint (ties to even, following
+    /// the current rounding direction like C's rint). Both are integer-valued
+    /// and monotonically non-decreasing, so like floor/ceil/trunc their
+    /// interval image is exact.
+    FloatRound,
+    FloatRint,
+    /// llvm.copysign: magnitude of the first operand, sign bit of the second.
+    FloatCopysign,
+    /// llvm.sqrt: principal square root. Monotonic on [0, inf), NaN below that.
+    /// Roots are generally not representable, so the interval image needs
+    /// outward rounding.
+    FloatSqrt,
     BeginIkosIntrinsic,
     // <ikos/analyzer/intrinsic.h>
     IkosAssert,

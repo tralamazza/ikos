@@ -743,6 +743,34 @@ public:
     this->_scalar.float_assign_nondet(x);
   }
 
+  void float_assign_cst(VariableRef x, const FloatingPoint& cst) override {
+    this->_scalar.float_assign_cst(x, cst);
+  }
+
+  const FloatingPoint* float_get_cst(VariableRef x) const override {
+    return this->_scalar.float_get_cst(x);
+  }
+
+  void float_assign_interval(VariableRef x, const core::floating_point::Interval& iv) override {
+    this->_scalar.float_assign_interval(x, iv);
+  }
+
+  const core::floating_point::Interval* float_get_interval(VariableRef x) const override {
+    return this->_scalar.float_get_interval(x);
+  }
+
+  void float_add(IEEEPredicate pred,
+                 VariableRef x,
+                 const FloatingPoint& cst) override {
+    this->_scalar.float_add(pred, x, cst);
+  }
+
+  void float_add(IEEEPredicate pred,
+                 const FloatingPoint& cst,
+                 VariableRef x) override {
+    this->_scalar.float_add(pred, cst, x);
+  }
+
   void float_assign(VariableRef x, VariableRef y) override {
     this->_scalar.float_assign(x, y);
   }
@@ -912,6 +940,18 @@ public:
     this->_scalar.dynamic_write_nondet_float(x);
   }
 
+  void dynamic_write_float(VariableRef x, const FloatingPoint& f) override {
+    this->_scalar.dynamic_write_float(x, f);
+  }
+
+  void dynamic_write_float(VariableRef x, VariableRef y) override {
+    this->_scalar.dynamic_write_float(x, y);
+  }
+
+  void dynamic_read_float(VariableRef x, VariableRef y) override {
+    this->_scalar.dynamic_read_float(x, y);
+  }
+
   void dynamic_write_null(VariableRef x) override {
     this->_scalar.dynamic_write_null(x);
   }
@@ -989,7 +1029,7 @@ private:
 
     Signedness machine_int(const MachineInt& i) const { return i.sign(); }
 
-    Signedness floating_point(const DummyNumber&) const { return Signed; }
+    Signedness floating_point(const FloatingPoint&) const { return Signed; }
 
     Signedness memory_location(MemoryLocationRef) const { return Unsigned; }
 
@@ -1272,8 +1312,15 @@ private:
       }
     }
 
-    void floating_point(const DummyNumber&) {
-      this->_scalar.dynamic_write_nondet_float(this->_lhs);
+    void floating_point(const FloatingPoint& rhs) {
+      // No float width trait exists on the variable, so the width travels with
+      // the value: dynamic_write_float tops the cell for unmodeled widths
+      // instead of storing a value of the wrong shape.
+      if (rhs.is_modeled()) {
+        this->_scalar.dynamic_write_float(this->_lhs, rhs);
+      } else {
+        this->_scalar.dynamic_write_nondet_float(this->_lhs);
+      }
     }
 
     void memory_location(MemoryLocationRef addr) {
@@ -1295,8 +1342,8 @@ private:
       }
     }
 
-    void floating_point_var(VariableRef /*rhs*/) {
-      this->_scalar.dynamic_write_nondet_float(this->_lhs);
+    void floating_point_var(VariableRef rhs) {
+      this->_scalar.dynamic_write_float(this->_lhs, rhs);
     }
 
     void pointer_var(VariableRef rhs) {
@@ -1322,7 +1369,7 @@ private:
       ikos_unreachable("trying to assign a machine integer");
     }
 
-    void floating_point(const DummyNumber&) {
+    void floating_point(const FloatingPoint&) {
       ikos_unreachable("trying to assign a floating point");
     }
 
@@ -1350,7 +1397,7 @@ private:
     }
 
     void floating_point_var(VariableRef lhs) {
-      this->_scalar.float_assign_nondet(lhs);
+      this->_scalar.dynamic_read_float(lhs, this->_rhs);
     }
 
     void pointer_var(VariableRef lhs) {

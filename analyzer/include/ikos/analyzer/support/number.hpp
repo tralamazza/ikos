@@ -51,6 +51,7 @@
 #pragma once
 
 #include <ikos/core/number/dummy_number.hpp>
+#include <ikos/core/number/floating_point.hpp>
 #include <ikos/core/number/machine_int.hpp>
 #include <ikos/core/number/signedness.hpp>
 #include <ikos/core/number/supported_integral.hpp>
@@ -67,6 +68,7 @@ using ikos::core::Unsigned;
 
 /// \brief Empty class that represents a number
 using DummyNumber = ikos::core::DummyNumber;
+using FloatingPoint = ikos::core::FloatingPoint;
 
 /// \brief Class for unlimited precision integers
 using ZNumber = ikos::core::ZNumber;

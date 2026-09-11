@@ -23,11 +23,9 @@
 - Be concise and direct.
 - Do not oversell solutions.
 - If confidence is low, say so clearly.
-- Don't use emdash.
 
 ## Workflow
 
-Before committing, always run:
-
-- linter
+Before committing, always run (if available):
+- linters
 - tests

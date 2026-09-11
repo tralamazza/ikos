@@ -2026,6 +2026,28 @@ def generate_double_free_message(report, verbosity):
     return s
 
 
+def generate_float_to_int_overflow_message(report, verbosity):
+    if report.status == Result.OK:
+        return 'float to int conversion does not overflow'
+
+    if report.status == Result.ERROR:
+        s = 'float to int conversion overflows'
+    elif report.status == Result.WARNING:
+        s = 'float to int conversion might overflow'
+    else:
+        assert False, 'unexpected status'
+
+    (_, operand), = report.load_operands()
+    if operand.kind != ValueKind.FLOAT_CONSTANT:
+        s += ' (%s)' % operand.repr
+
+    if verbosity >= 2:
+        s += ('\nconverting a floating-point value to an integer type that '
+              'cannot represent the truncated value is undefined behaviour in C')
+
+    return s
+
+
 GENERATE_MESSAGE_MAP = {
     CheckKind.UNREACHABLE: generate_unreachable_message,
     CheckKind.UNEXPECTED_OPERAND: generate_unexpected_operand_message,
@@ -2075,6 +2097,7 @@ GENERATE_MESSAGE_MAP = {
         generate_unknown_function_call_message,
     CheckKind.FUNCTION_CALL: generate_function_call_message,
     CheckKind.FREE: generate_double_free_message,
+    CheckKind.FLOAT_TO_INT_OVERFLOW: generate_float_to_int_overflow_message,
 }
 
 

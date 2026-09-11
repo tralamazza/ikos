@@ -43,3 +43,5 @@ __pycache__
 *.txt.bak
 2026-06-01-003618-review-this-branch-against-main.txt
 .pi-tasks/
+.auto/*.log
+.auto/bench/*.pyc

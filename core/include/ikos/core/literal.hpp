@@ -49,6 +49,7 @@
 #include <boost/version.hpp>
 
 #include <ikos/core/number/dummy_number.hpp>
+#include <ikos/core/number/floating_point.hpp>
 #include <ikos/core/number/machine_int.hpp>
 #include <ikos/core/semantic/dumpable.hpp>
 #include <ikos/core/semantic/memory_location.hpp>
@@ -86,10 +87,11 @@ private:
   };
 
   struct FloatingPointLit {
-    // TODO(marthaud): Add a class to represent floating points
-    DummyNumber value;
+    FloatingPoint value;
 
-    bool operator==(const FloatingPointLit&) const { return true; }
+    // Bit-pattern identity, so distinct FP constants no longer collapse together.
+    // (This used to be `return true`, which made every FP constant compare equal.)
+    bool operator==(const FloatingPointLit& o) const { return value == o.value; }
   };
 
   struct MemoryLocationLit {
@@ -176,8 +178,8 @@ public:
   }
 
   /// \brief Create a constant floating point literal
-  static Literal floating_point(DummyNumber) {
-    return Literal(Lit(FloatingPointLit{DummyNumber{}}));
+  static Literal floating_point(FloatingPoint v) {
+    return Literal(Lit(FloatingPointLit{v}));
   }
 
   /// \brief Create a constant memory location literal
@@ -357,45 +359,45 @@ public:
 
 private:
   /// \brief Visitor that returns the floating point
-  struct GetFloatingPoint : public boost::static_visitor< const DummyNumber& > {
-    const DummyNumber& operator()(const MachineIntLit&) const {
+  struct GetFloatingPoint : public boost::static_visitor< const FloatingPoint& > {
+    const FloatingPoint& operator()(const MachineIntLit&) const {
       ikos_unreachable("trying to call floating_point() on a machine integer");
     }
 
-    const DummyNumber& operator()(const FloatingPointLit& lit) const {
+    const FloatingPoint& operator()(const FloatingPointLit& lit) const {
       return lit.value;
     }
 
-    const DummyNumber& operator()(const MemoryLocationLit&) const {
+    const FloatingPoint& operator()(const MemoryLocationLit&) const {
       ikos_unreachable("trying to call floating_point() on a memory location");
     }
 
-    const DummyNumber& operator()(const NullLit&) const {
+    const FloatingPoint& operator()(const NullLit&) const {
       ikos_unreachable("trying to call floating_point() on null");
     }
 
-    const DummyNumber& operator()(const UndefinedLit&) const {
+    const FloatingPoint& operator()(const UndefinedLit&) const {
       ikos_unreachable("trying to call floating_point() on undefined");
     }
 
-    const DummyNumber& operator()(const MachineIntVarLit&) const {
+    const FloatingPoint& operator()(const MachineIntVarLit&) const {
       ikos_unreachable(
           "trying to call floating_point() on a machine integer variable");
     }
 
-    const DummyNumber& operator()(const FloatingPointVarLit&) const {
+    const FloatingPoint& operator()(const FloatingPointVarLit&) const {
       ikos_unreachable(
           "trying to call floating_point() on a floating point variable");
     }
 
-    const DummyNumber& operator()(const PointerVarLit&) const {
+    const FloatingPoint& operator()(const PointerVarLit&) const {
       ikos_unreachable("trying to call floating_point() on a pointer variable");
     }
   };
 
 public:
   /// \brief Get the floating point
-  const DummyNumber& floating_point() const {
+  const FloatingPoint& floating_point() const {
     return boost::apply_visitor(GetFloatingPoint(), this->_lit);
   }
 
@@ -490,7 +492,7 @@ public:
   /// Visitors should implement the following methods:
   ///
   /// R machine_int(const MachineInt&);
-  /// R floating_point(const DummyNumber&);
+  /// R floating_point(const FloatingPoint&);
   /// R memory_location(MemoryLocationRef);
   /// R null();
   /// R undefined();

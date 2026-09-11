@@ -45,12 +45,59 @@
 
 #include <boost/thread/locks.hpp>
 
+#include <cerrno>
+#include <cmath>
+#include <cstdlib>
+
 #include <ikos/ar/semantic/value_visitor.hpp>
 
 #include <ikos/analyzer/analysis/literal.hpp>
 
 namespace ikos {
 namespace analyzer {
+
+namespace {
+
+/// \brief Convert an AR floating point constant into a core::FloatingPoint
+///
+/// The frontend stores the value as the shortest decimal string that round-trips
+/// (llvm::APFloat::toString with FormatPrecision = 0), so re-parsing with the
+/// width-matched strtod/strtof recovers the exact bit pattern. Widths we cannot
+/// reproduce exactly -- binary16, x87 80-bit, binary128 -- come back unmodeled
+/// so callers top out instead of reasoning about a value we got wrong.
+core::FloatingPoint to_floating_point(ar::FloatConstant* c) {
+  const std::string& s = c->value();
+  const char* begin = s.c_str();
+
+  switch (c->type()->float_semantic()) {
+  case ar::Float: {
+    char* end = nullptr;
+    errno = 0;
+    float v = std::strtof(begin, &end);
+    if (end != begin + s.size()) {
+      return core::FloatingPoint::unmodeled(32);
+    }
+    return core::FloatingPoint::from_float(v);
+  }
+
+  case ar::Double: {
+    char* end = nullptr;
+    errno = 0;
+    double v = std::strtod(begin, &end);
+    if (end != begin + s.size()) {
+      return core::FloatingPoint::unmodeled(64);
+    }
+    return core::FloatingPoint::from_double(v);
+  }
+
+  default:
+    // Half, X86_FP80, FP128, PPC_FP128.
+    return core::FloatingPoint::unmodeled(
+        static_cast< uint16_t >(c->type()->bit_width()));
+  }
+}
+
+} // end anonymous namespace
 
 LiteralFactory::LiteralFactory(VariableFactory& vfac,
                                const ar::DataLayout& data_layout)
@@ -194,8 +241,8 @@ public:
     return Literal(ScalarLit::machine_int(c->value()));
   }
 
-  Literal operator()(ar::FloatConstant* /*f*/) {
-    return Literal(ScalarLit::floating_point(DummyNumber{}));
+  Literal operator()(ar::FloatConstant* c) {
+    return Literal(ScalarLit::floating_point(to_floating_point(c)));
   }
 
   Literal operator()(ar::NullConstant* /*n*/) {

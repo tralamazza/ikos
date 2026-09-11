@@ -46,6 +46,7 @@
 #include <ikos/core/domain/machine_int/abstract_domain.hpp>
 #include <ikos/core/domain/nullity/abstract_domain.hpp>
 #include <ikos/core/domain/scalar/abstract_domain.hpp>
+#include <ikos/core/domain/scalar/float_interval.hpp>
 #include <ikos/core/domain/separate_domain.hpp>
 #include <ikos/core/domain/uninitialized/abstract_domain.hpp>
 
@@ -137,6 +138,11 @@ private:
   /// \brief Underlying nullity abstract domains
   NullityDomain _nullity;
 
+  /// \brief Floating point constant propagation
+  ///
+  /// Flat lattice over floating point variables. See scalar::FloatIntervalDomain.
+  FloatIntervalDomain< VariableRef > _float;
+
   /// \brief Map pointer variables to set of addresses
   PointsToMap _points_to_map;
 
@@ -145,10 +151,12 @@ private:
   CompositeDomain(UninitializedDomain uninitialized,
                   MachineIntDomain integer,
                   NullityDomain nullity,
+                  FloatIntervalDomain< VariableRef > floating,
                   PointsToMap points_to_map)
       : _uninitialized(std::move(uninitialized)),
         _integer(std::move(integer)),
         _nullity(std::move(nullity)),
+        _float(std::move(floating)),
         _points_to_map(std::move(points_to_map)) {
     this->normalize();
   }
@@ -159,12 +167,16 @@ public:
   /// \param uninitialized The uninitialized abstract value
   /// \param integer The machine integer abstract value
   /// \param nullity The nullity abstract value
+  /// \param floating The floating point constant abstract value
   CompositeDomain(UninitializedDomain uninitialized,
                   MachineIntDomain integer,
-                  NullityDomain nullity)
+                  NullityDomain nullity,
+                  FloatIntervalDomain< VariableRef > floating =
+                      FloatIntervalDomain< VariableRef >{})
       : _uninitialized(std::move(uninitialized)),
         _integer(std::move(integer)),
         _nullity(std::move(nullity)),
+        _float(std::move(floating)),
         _points_to_map(PointsToMap::top()) {
     this->normalize();
   }
@@ -223,6 +235,11 @@ public:
       this->set_to_bottom();
       return;
     }
+
+    if (this->_float.is_bottom()) {
+      this->set_to_bottom();
+      return;
+    }
   }
 
 private:
@@ -233,12 +250,12 @@ private:
 
 public:
   bool is_bottom() const override {
-    return this->_uninitialized.is_bottom() || this->_nullity.is_bottom() ||
+    return this->_uninitialized.is_bottom() || this->_nullity.is_bottom() || this->_float.is_bottom() ||
            this->_points_to_map.is_bottom() || this->_integer.is_bottom();
   }
 
   bool is_top() const override {
-    return this->_uninitialized.is_top() && this->_nullity.is_top() &&
+    return this->_uninitialized.is_top() && this->_nullity.is_top() && this->_float.is_top() &&
            this->_points_to_map.is_top() && this->_integer.is_top();
   }
 
@@ -246,6 +263,7 @@ public:
     this->_uninitialized.set_to_bottom();
     this->_integer.set_to_bottom();
     this->_nullity.set_to_bottom();
+    this->_float.set_to_bottom();
     this->_points_to_map.set_to_bottom();
   }
 
@@ -253,6 +271,7 @@ public:
     this->_uninitialized.set_to_top();
     this->_integer.set_to_top();
     this->_nullity.set_to_top();
+    this->_float.set_to_top();
     this->_points_to_map.set_to_top();
   }
 
@@ -264,7 +283,7 @@ public:
     } else {
       return this->_uninitialized.leq(other._uninitialized) &&
              this->_integer.leq(other._integer) &&
-             this->_nullity.leq(other._nullity) &&
+             this->_nullity.leq(other._nullity) && this->_float.leq(other._float) &&
              this->_points_to_map.leq(other._points_to_map);
     }
   }
@@ -277,7 +296,7 @@ public:
     } else {
       return this->_uninitialized.equals(other._uninitialized) &&
              this->_integer.equals(other._integer) &&
-             this->_nullity.equals(other._nullity) &&
+             this->_nullity.equals(other._nullity) && this->_float.equals(other._float) &&
              this->_points_to_map.equals(other._points_to_map);
     }
   }
@@ -293,6 +312,7 @@ public:
       this->_uninitialized.join_with(std::move(other._uninitialized));
       this->_integer.join_with(std::move(other._integer));
       this->_nullity.join_with(std::move(other._nullity));
+      this->_float.join_with(std::move(other._float));
       this->_points_to_map.join_with(std::move(other._points_to_map));
     }
   }
@@ -307,6 +327,7 @@ public:
       this->_uninitialized.join_with(other._uninitialized);
       this->_integer.join_with(other._integer);
       this->_nullity.join_with(other._nullity);
+      this->_float.join_with(other._float);
       this->_points_to_map.join_with(other._points_to_map);
     }
   }
@@ -322,6 +343,7 @@ public:
       this->_uninitialized.join_loop_with(std::move(other._uninitialized));
       this->_integer.join_loop_with(std::move(other._integer));
       this->_nullity.join_loop_with(std::move(other._nullity));
+      this->_float.join_loop_with(std::move(other._float));
       this->_points_to_map.join_loop_with(std::move(other._points_to_map));
     }
   }
@@ -336,6 +358,7 @@ public:
       this->_uninitialized.join_loop_with(other._uninitialized);
       this->_integer.join_loop_with(other._integer);
       this->_nullity.join_loop_with(other._nullity);
+      this->_float.join_loop_with(other._float);
       this->_points_to_map.join_loop_with(other._points_to_map);
     }
   }
@@ -351,6 +374,7 @@ public:
       this->_uninitialized.join_iter_with(std::move(other._uninitialized));
       this->_integer.join_iter_with(std::move(other._integer));
       this->_nullity.join_iter_with(std::move(other._nullity));
+      this->_float.join_iter_with(std::move(other._float));
       this->_points_to_map.join_iter_with(std::move(other._points_to_map));
     }
   }
@@ -365,6 +389,7 @@ public:
       this->_uninitialized.join_iter_with(other._uninitialized);
       this->_integer.join_iter_with(other._integer);
       this->_nullity.join_iter_with(other._nullity);
+      this->_float.join_iter_with(other._float);
       this->_points_to_map.join_iter_with(other._points_to_map);
     }
   }
@@ -379,6 +404,7 @@ public:
       this->_uninitialized.widen_with(other._uninitialized);
       this->_integer.widen_with(other._integer);
       this->_nullity.widen_with(other._nullity);
+      this->_float.widen_with(other._float);
       this->_points_to_map.widen_with(other._points_to_map);
     }
   }
@@ -394,6 +420,7 @@ public:
       this->_uninitialized.widen_with(other._uninitialized);
       this->_integer.widen_threshold_with(other._integer, threshold);
       this->_nullity.widen_with(other._nullity);
+      this->_float.widen_with(other._float);
       this->_points_to_map.widen_with(other._points_to_map);
     }
   }
@@ -408,6 +435,7 @@ public:
       this->_uninitialized.meet_with(other._uninitialized);
       this->_integer.meet_with(other._integer);
       this->_nullity.meet_with(other._nullity);
+      this->_float.meet_with(other._float);
       this->_points_to_map.meet_with(other._points_to_map);
     }
   }
@@ -422,6 +450,7 @@ public:
       this->_uninitialized.narrow_with(other._uninitialized);
       this->_integer.narrow_with(other._integer);
       this->_nullity.narrow_with(other._nullity);
+      this->_float.narrow_with(other._float);
       this->_points_to_map.narrow_with(other._points_to_map);
     }
   }
@@ -437,6 +466,7 @@ public:
       this->_uninitialized.narrow_with(other._uninitialized);
       this->_integer.narrow_threshold_with(other._integer, threshold);
       this->_nullity.narrow_with(other._nullity);
+      this->_float.narrow_with(other._float);
       this->_points_to_map.narrow_with(other._points_to_map);
     }
   }
@@ -450,6 +480,7 @@ public:
       return CompositeDomain(this->_uninitialized.join(other._uninitialized),
                              this->_integer.join(other._integer),
                              this->_nullity.join(other._nullity),
+                             this->_float.join(other._float),
                              this->_points_to_map.join(other._points_to_map));
     }
   }
@@ -464,6 +495,7 @@ public:
                                  other._uninitialized),
                              this->_integer.join_loop(other._integer),
                              this->_nullity.join_loop(other._nullity),
+                             this->_float.join_loop(other._float),
                              this->_points_to_map.join_loop(
                                  other._points_to_map));
     }
@@ -479,6 +511,7 @@ public:
                                  other._uninitialized),
                              this->_integer.join_iter(other._integer),
                              this->_nullity.join_iter(other._nullity),
+                             this->_float.join_iter(other._float),
                              this->_points_to_map.join_iter(
                                  other._points_to_map));
     }
@@ -494,6 +527,7 @@ public:
                                  other._uninitialized),
                              this->_integer.widening(other._integer),
                              this->_nullity.widening(other._nullity),
+                             this->_float.widening(other._float),
                              this->_points_to_map.widening(
                                  other._points_to_map));
     }
@@ -512,6 +546,7 @@ public:
                              this->_integer.widening_threshold(other._integer,
                                                                threshold),
                              this->_nullity.widening(other._nullity),
+                             this->_float.widening(other._float),
                              this->_points_to_map.widening(
                                  other._points_to_map));
     }
@@ -526,6 +561,7 @@ public:
       return CompositeDomain(this->_uninitialized.meet(other._uninitialized),
                              this->_integer.meet(other._integer),
                              this->_nullity.meet(other._nullity),
+                             this->_float.meet(other._float),
                              this->_points_to_map.meet(other._points_to_map));
     }
   }
@@ -540,6 +576,7 @@ public:
                                  other._uninitialized),
                              this->_integer.narrowing(other._integer),
                              this->_nullity.narrowing(other._nullity),
+                             this->_float.narrowing(other._float),
                              this->_points_to_map.narrowing(
                                  other._points_to_map));
     }
@@ -558,6 +595,7 @@ public:
                              this->_integer.narrowing_threshold(other._integer,
                                                                 threshold),
                              this->_nullity.narrowing(other._nullity),
+                             this->_float.narrowing(other._float),
                              this->_points_to_map.narrowing(
                                  other._points_to_map));
     }
@@ -945,12 +983,15 @@ public:
     ikos_assert(ScalarVariableTrait::is_float(x));
 
     this->_uninitialized.assign_uninitialized(x);
+    this->_float.forget(x);
   }
 
   void float_assign_nondet(VariableRef x) override {
     ikos_assert(ScalarVariableTrait::is_float(x));
 
     this->_uninitialized.assign_initialized(x);
+    // A nondeterministic value is by definition not a known constant.
+    this->_float.forget(x);
   }
 
   void float_assign(VariableRef x, VariableRef y) override {
@@ -958,12 +999,54 @@ public:
     ikos_assert(ScalarVariableTrait::is_float(y));
 
     this->_uninitialized.assign(x, y);
+    this->_float.assign(x, y);
+  }
+
+  void float_assign_cst(VariableRef x, const FloatingPoint& cst) override {
+    ikos_assert(ScalarVariableTrait::is_float(x));
+
+    this->_uninitialized.assign_initialized(x);
+    this->_float.assign(x, cst);
+  }
+
+  const FloatingPoint* float_get_cst(VariableRef x) const override {
+    return this->_float.get(x);
+  }
+
+  void float_assign_interval(VariableRef x, const core::floating_point::Interval& iv) override {
+    ikos_assert(ScalarVariableTrait::is_float(x));
+
+    this->_uninitialized.assign_initialized(x);
+    this->_float.apply_interval(x, iv);
+  }
+
+  const core::floating_point::Interval* float_get_interval(VariableRef x) const override {
+    return this->_float.get_interval(x);
+  }
+
+  void float_add(IEEEPredicate pred,
+                 VariableRef x,
+                 const FloatingPoint& cst) override {
+    ikos_assert(ScalarVariableTrait::is_float(x));
+
+    this->_uninitialized.assign_initialized(x);
+    this->_float.refine(x, pred, cst);
+  }
+
+  void float_add(IEEEPredicate pred,
+                 const FloatingPoint& cst,
+                 VariableRef x) override {
+    ikos_assert(ScalarVariableTrait::is_float(x));
+
+    this->_uninitialized.assign_initialized(x);
+    this->_float.refine_flipped(x, pred, cst);
   }
 
   void float_forget(VariableRef x) override {
     ikos_assert(ScalarVariableTrait::is_float(x));
 
     this->_uninitialized.forget(x);
+    this->_float.forget(x);
   }
 
   /// @}
@@ -1475,6 +1558,11 @@ public:
     this->_nullity.forget(x);
     this->_points_to_map.forget(x);
     this->_integer.forget(ScalarVariableTrait::offset_var(x));
+    // A non-float value now occupies this cell, so any float fact
+    // about it is stale. Without this, type punning (write float,
+    // overwrite with int, read back as float) resurrects the
+    // discarded float. Run #66 introduced the need for this.
+    this->_float.forget(x);
   }
 
   void dynamic_write_nondet(VariableRef x) override {
@@ -1489,6 +1577,11 @@ public:
     this->_nullity.forget(x);
     this->_points_to_map.forget(x);
     this->_integer.forget(ScalarVariableTrait::offset_var(x));
+    // A non-float value now occupies this cell, so any float fact
+    // about it is stale. Without this, type punning (write float,
+    // overwrite with int, read back as float) resurrects the
+    // discarded float. Run #66 introduced the need for this.
+    this->_float.forget(x);
   }
 
   void dynamic_write_int(VariableRef x, const MachineInt& n) override {
@@ -1508,6 +1601,11 @@ public:
     this->_nullity.forget(x);
     this->_points_to_map.forget(x);
     this->_integer.forget(ScalarVariableTrait::offset_var(x));
+    // A non-float value now occupies this cell, so any float fact
+    // about it is stale. Without this, type punning (write float,
+    // overwrite with int, read back as float) resurrects the
+    // discarded float. Run #66 introduced the need for this.
+    this->_float.forget(x);
   }
 
   void dynamic_write_nondet_int(VariableRef x) override {
@@ -1522,6 +1620,11 @@ public:
     this->_nullity.forget(x);
     this->_points_to_map.forget(x);
     this->_integer.forget(ScalarVariableTrait::offset_var(x));
+    // A non-float value now occupies this cell, so any float fact
+    // about it is stale. Without this, type punning (write float,
+    // overwrite with int, read back as float) resurrects the
+    // discarded float. Run #66 introduced the need for this.
+    this->_float.forget(x);
   }
 
   void dynamic_write_int(VariableRef x, VariableRef y) override {
@@ -1543,6 +1646,11 @@ public:
     this->_nullity.forget(x);
     this->_points_to_map.forget(x);
     this->_integer.forget(ScalarVariableTrait::offset_var(x));
+    // A non-float value now occupies this cell, so any float fact
+    // about it is stale. Without this, type punning (write float,
+    // overwrite with int, read back as float) resurrects the
+    // discarded float. Run #66 introduced the need for this.
+    this->_float.forget(x);
   }
 
   void dynamic_write_nondet_float(VariableRef x) override {
@@ -1557,6 +1665,52 @@ public:
     this->_nullity.forget(x);
     this->_points_to_map.forget(x);
     this->_integer.forget(ScalarVariableTrait::offset_var(x));
+  }
+
+  void dynamic_write_float(VariableRef x, const FloatingPoint& f) override {
+    ikos_assert(ScalarVariableTrait::is_dynamic(x));
+
+    if (this->is_bottom_fast()) {
+      return;
+    }
+
+    // A float occupies the cell, so every integer and pointer fact is void.
+    this->_uninitialized.assign_initialized(x);
+    this->_integer.forget(x);
+    this->_nullity.forget(x);
+    this->_points_to_map.forget(x);
+    this->_integer.forget(ScalarVariableTrait::offset_var(x));
+    if (f.is_modeled()) {
+      this->_float.assign(x, f);
+    } else {
+      this->_float.forget(x);
+    }
+  }
+
+  void dynamic_write_float(VariableRef x, VariableRef y) override {
+    ikos_assert(ScalarVariableTrait::is_dynamic(x));
+
+    if (this->is_bottom_fast()) {
+      return;
+    }
+
+    this->_uninitialized.assign_initialized(x);
+    this->_integer.forget(x);
+    this->_nullity.forget(x);
+    this->_points_to_map.forget(x);
+    this->_integer.forget(ScalarVariableTrait::offset_var(x));
+    this->_float.assign(x, y);
+  }
+
+  void dynamic_read_float(VariableRef x, VariableRef y) override {
+    ikos_assert(ScalarVariableTrait::is_dynamic(y));
+
+    if (this->is_bottom_fast()) {
+      return;
+    }
+
+    this->_uninitialized.assign(x, y);
+    this->_float.assign(x, y);
   }
 
   void dynamic_write_null(VariableRef x) override {
@@ -1574,6 +1728,11 @@ public:
     this->_integer.assign(offset,
                           MachineInt::zero(IntVariableTrait::bit_width(offset),
                                            IntVariableTrait::sign(offset)));
+    // A non-float value now occupies this cell, so any float fact
+    // about it is stale. Without this, type punning (write float,
+    // overwrite with int, read back as float) resurrects the
+    // discarded float. Run #66 introduced the need for this.
+    this->_float.forget(x);
   }
 
   void dynamic_write_pointer(VariableRef x,
@@ -1593,6 +1752,11 @@ public:
     this->_integer.assign(offset,
                           MachineInt::zero(IntVariableTrait::bit_width(offset),
                                            IntVariableTrait::sign(offset)));
+    // A non-float value now occupies this cell, so any float fact
+    // about it is stale. Without this, type punning (write float,
+    // overwrite with int, read back as float) resurrects the
+    // discarded float. Run #66 introduced the need for this.
+    this->_float.forget(x);
   }
 
   void dynamic_write_pointer(VariableRef x, VariableRef y) override {
@@ -1609,6 +1773,11 @@ public:
     this->_points_to_map.set(x, this->_points_to_map.get(y));
     this->_integer.assign(ScalarVariableTrait::offset_var(x),
                           ScalarVariableTrait::offset_var(y));
+    // A non-float value now occupies this cell, so any float fact
+    // about it is stale. Without this, type punning (write float,
+    // overwrite with int, read back as float) resurrects the
+    // discarded float. Run #66 introduced the need for this.
+    this->_float.forget(x);
   }
 
   void dynamic_read_int(VariableRef x, VariableRef y) override {
@@ -1819,6 +1988,8 @@ public:
       this->_integer.dump(o);
       o << ", ";
       this->_nullity.dump(o);
+      o << ", ";
+      this->_float.dump(o);
       o << ", ";
       this->_points_to_map.dump(o);
       o << ")";

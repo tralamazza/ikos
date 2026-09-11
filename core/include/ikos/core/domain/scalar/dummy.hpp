@@ -339,6 +339,20 @@ public:
 
   void float_assign_nondet(VariableRef) override {}
 
+  void float_assign_cst(VariableRef, const FloatingPoint&) override {}
+
+  const FloatingPoint* float_get_cst(VariableRef) const override {
+    return nullptr;
+  }
+
+  void float_assign_interval(VariableRef, const core::floating_point::Interval&) override {}
+
+  const core::floating_point::Interval* float_get_interval(VariableRef) const override { return nullptr; }
+
+  void float_add(IEEEPredicate, VariableRef, const FloatingPoint&) override {}
+
+  void float_add(IEEEPredicate, const FloatingPoint&, VariableRef) override {}
+
   void float_assign(VariableRef, VariableRef) override {}
 
   void float_forget(VariableRef) override {}
@@ -511,6 +525,12 @@ public:
   void dynamic_write_int(VariableRef, VariableRef) override {}
 
   void dynamic_write_nondet_float(VariableRef) override {}
+
+  void dynamic_write_float(VariableRef, const FloatingPoint&) override {}
+
+  void dynamic_write_float(VariableRef, VariableRef) override {}
+
+  void dynamic_read_float(VariableRef, VariableRef) override {}
 
   void dynamic_write_null(VariableRef) override {}
 

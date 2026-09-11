@@ -162,6 +162,15 @@ enum class CheckKind {
   /// \brief Check for a memory deallocation (e.g, free)
   Free,
 
+  /// \brief Check for a floating-point to integer conversion whose value cannot
+  /// be represented in the target integer type. Undefined behaviour in C, so
+  /// this is reported as an error rather than a warning.
+  ///
+  /// Appended last: CheckKind values are persisted as raw integers in the output
+  /// database and mirrored positionally in the Python enums, so inserting
+  /// anywhere else would invalidate existing databases.
+  FloatToIntOverflow,
+
 };
 
 } // end namespace analyzer

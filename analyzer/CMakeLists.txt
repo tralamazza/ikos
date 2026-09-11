@@ -272,6 +272,7 @@ add_library(ikos-analyzer-core STATIC
   src/checker/debug.cpp
   src/checker/division_by_zero.cpp
   src/checker/double_free.cpp
+  src/checker/float_to_int_overflow.cpp
   src/checker/function_call.cpp
   src/checker/int_overflow_base.cpp
   src/checker/memory_watch.cpp

@@ -178,6 +178,7 @@ analyses = (
     ('dfa', 'Double Free Analysis'),
     ('dbg', 'Debugger'),
     ('watch', 'Memory Watcher'),
+    ('f2i', 'Float To Int Overflow Analysis'),
 )
 
 default_analyses = (

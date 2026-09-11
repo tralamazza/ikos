@@ -385,6 +385,28 @@ private:
     /// \brief Assign `x` to a non deterministic floating point
     virtual void float_assign_nondet(VariableRef x) = 0;
 
+    /// \brief Assign `x = cst`
+    virtual void float_assign_cst(VariableRef x, const FloatingPoint& cst) = 0;
+
+    /// \brief Get the known constant value of `x`, or nullptr if unknown
+    virtual const FloatingPoint* float_get_cst(VariableRef x) const = 0;
+
+    /// \brief Set `x` to a known interval
+    virtual void float_assign_interval(VariableRef x, const core::floating_point::Interval& iv) = 0;
+
+    /// \brief Get the known interval for `x`, or nullptr if nothing is known
+    virtual const core::floating_point::Interval* float_get_interval(VariableRef x) const = 0;
+
+    /// \brief Constrain `x` by `x pred cst`
+    virtual void float_add(IEEEPredicate pred,
+                          VariableRef x,
+                          const FloatingPoint& cst) = 0;
+
+    /// \brief Constrain `x` by `cst pred x`
+    virtual void float_add(IEEEPredicate pred,
+                          const FloatingPoint& cst,
+                          VariableRef x) = 0;
+
     /// \brief Assign `x = y`
     virtual void float_assign(VariableRef x, VariableRef y) = 0;
 
@@ -525,6 +547,15 @@ private:
 
     /// \brief Write a non deterministic float to a dynamically typed variable
     virtual void dynamic_write_nondet_float(VariableRef x) = 0;
+
+    /// \brief Write a float to a dynamically typed variable
+    virtual void dynamic_write_float(VariableRef x, const FloatingPoint& f) = 0;
+
+    /// \brief Write a float variable to a dynamically typed variable
+    virtual void dynamic_write_float(VariableRef x, VariableRef y) = 0;
+
+    /// \brief Read a float variable from a dynamically typed variable
+    virtual void dynamic_read_float(VariableRef x, VariableRef y) = 0;
 
     /// \brief Write null to a dynamically typed variable
     virtual void dynamic_write_null(VariableRef x) = 0;
@@ -1106,6 +1137,34 @@ private:
       this->_inv.float_assign_nondet(x);
     }
 
+    void float_assign_cst(VariableRef x, const FloatingPoint& cst) override {
+      this->_inv.float_assign_cst(x, cst);
+    }
+
+    const FloatingPoint* float_get_cst(VariableRef x) const override {
+      return this->_inv.float_get_cst(x);
+    }
+
+    void float_assign_interval(VariableRef x, const core::floating_point::Interval& iv) override {
+      this->_inv.float_assign_interval(x, iv);
+    }
+
+    const core::floating_point::Interval* float_get_interval(VariableRef x) const override {
+      return this->_inv.float_get_interval(x);
+    }
+
+    void float_add(IEEEPredicate pred,
+                   VariableRef x,
+                   const FloatingPoint& cst) override {
+      this->_inv.float_add(pred, x, cst);
+    }
+
+    void float_add(IEEEPredicate pred,
+                   const FloatingPoint& cst,
+                   VariableRef x) override {
+      this->_inv.float_add(pred, cst, x);
+    }
+
     void float_assign(VariableRef x, VariableRef y) override {
       this->_inv.float_assign(x, y);
     }
@@ -1273,6 +1332,18 @@ private:
 
     void dynamic_write_nondet_float(VariableRef x) override {
       this->_inv.dynamic_write_nondet_float(x);
+    }
+
+    void dynamic_write_float(VariableRef x, const FloatingPoint& f) override {
+      this->_inv.dynamic_write_float(x, f);
+    }
+
+    void dynamic_write_float(VariableRef x, VariableRef y) override {
+      this->_inv.dynamic_write_float(x, y);
+    }
+
+    void dynamic_read_float(VariableRef x, VariableRef y) override {
+      this->_inv.dynamic_read_float(x, y);
     }
 
     void dynamic_write_null(VariableRef x) override {
@@ -1766,6 +1837,34 @@ public:
     this->_ptr->float_assign_nondet(x);
   }
 
+  void float_assign_cst(VariableRef x, const FloatingPoint& cst) override {
+    this->_ptr->float_assign_cst(x, cst);
+  }
+
+  const FloatingPoint* float_get_cst(VariableRef x) const override {
+    return this->_ptr->float_get_cst(x);
+  }
+
+  void float_assign_interval(VariableRef x, const core::floating_point::Interval& iv) override {
+    this->_ptr->float_assign_interval(x, iv);
+  }
+
+  const core::floating_point::Interval* float_get_interval(VariableRef x) const override {
+    return this->_ptr->float_get_interval(x);
+  }
+
+  void float_add(IEEEPredicate pred,
+                 VariableRef x,
+                 const FloatingPoint& cst) override {
+    this->_ptr->float_add(pred, x, cst);
+  }
+
+  void float_add(IEEEPredicate pred,
+                 const FloatingPoint& cst,
+                 VariableRef x) override {
+    this->_ptr->float_add(pred, cst, x);
+  }
+
   void float_assign(VariableRef x, VariableRef y) override {
     this->_ptr->float_assign(x, y);
   }
@@ -1931,6 +2030,18 @@ public:
 
   void dynamic_write_nondet_float(VariableRef x) override {
     this->_ptr->dynamic_write_nondet_float(x);
+  }
+
+  void dynamic_write_float(VariableRef x, const FloatingPoint& f) override {
+    this->_ptr->dynamic_write_float(x, f);
+  }
+
+  void dynamic_write_float(VariableRef x, VariableRef y) override {
+    this->_ptr->dynamic_write_float(x, y);
+  }
+
+  void dynamic_read_float(VariableRef x, VariableRef y) override {
+    this->_ptr->dynamic_read_float(x, y);
   }
 
   void dynamic_write_null(VariableRef x) override {

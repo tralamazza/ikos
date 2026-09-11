@@ -45,6 +45,7 @@
 
 #include <ikos/core/domain/machine_int/abstract_domain.hpp>
 #include <ikos/core/domain/scalar/abstract_domain.hpp>
+#include <ikos/core/domain/scalar/float_interval.hpp>
 #include <ikos/core/domain/uninitialized/abstract_domain.hpp>
 
 namespace ikos {
@@ -99,13 +100,24 @@ private:
   /// \brief Underlying machine integer abstract domains
   MachineIntDomainT _integer;
 
+  /// \brief Floating point constant propagation
+  ///
+  /// Flat lattice over floating point variables. See scalar::FloatIntervalDomain.
+  FloatIntervalDomain< VariableRef > _float;
+
 public:
   /// \brief Create an abstract value with the given underlying abstract values
   ///
   /// \param uninitialized The uninitialized abstract value
   /// \param integer The machine integer abstract value
-  MachineIntDomain(UninitializedDomain uninitialized, MachineIntDomainT integer)
-      : _uninitialized(std::move(uninitialized)), _integer(std::move(integer)) {
+  /// \param floating The floating point constant abstract value
+  MachineIntDomain(UninitializedDomain uninitialized,
+                   MachineIntDomainT integer,
+                   FloatIntervalDomain< VariableRef > floating =
+                       FloatIntervalDomain< VariableRef >{})
+      : _uninitialized(std::move(uninitialized)),
+        _integer(std::move(integer)),
+        _float(std::move(floating)) {
     this->normalize();
   }
 
@@ -141,12 +153,20 @@ public:
     this->_uninitialized.normalize();
     if (this->_uninitialized.is_bottom()) {
       this->_integer.set_to_bottom();
+      this->_float.set_to_bottom();
       return;
     }
 
     this->_integer.normalize();
     if (this->_integer.is_bottom()) {
       this->_uninitialized.set_to_bottom();
+      this->_float.set_to_bottom();
+      return;
+    }
+
+    if (this->_float.is_bottom()) {
+      this->_uninitialized.set_to_bottom();
+      this->_integer.set_to_bottom();
       return;
     }
   }
@@ -163,17 +183,20 @@ public:
   }
 
   bool is_top() const override {
-    return this->_uninitialized.is_top() && this->_integer.is_top();
+    return this->_uninitialized.is_top() && this->_integer.is_top() &&
+           this->_float.is_top();
   }
 
   void set_to_bottom() override {
     this->_uninitialized.set_to_bottom();
     this->_integer.set_to_bottom();
+    this->_float.set_to_bottom();
   }
 
   void set_to_top() override {
     this->_uninitialized.set_to_top();
     this->_integer.set_to_top();
+    this->_float.set_to_top();
   }
 
   bool leq(const MachineIntDomain& other) const override {
@@ -183,7 +206,8 @@ public:
       return false;
     } else {
       return this->_uninitialized.leq(other._uninitialized) &&
-             this->_integer.leq(other._integer);
+             this->_integer.leq(other._integer) &&
+             this->_float.leq(other._float);
     }
   }
 
@@ -194,7 +218,8 @@ public:
       return false;
     } else {
       return this->_uninitialized.equals(other._uninitialized) &&
-             this->_integer.equals(other._integer);
+             this->_integer.equals(other._integer) &&
+             this->_float.equals(other._float);
     }
   }
 
@@ -208,6 +233,7 @@ public:
     } else {
       this->_uninitialized.join_with(std::move(other._uninitialized));
       this->_integer.join_with(std::move(other._integer));
+      this->_float.join_with(std::move(other._float));
     }
   }
 
@@ -220,6 +246,7 @@ public:
     } else {
       this->_uninitialized.join_with(other._uninitialized);
       this->_integer.join_with(other._integer);
+      this->_float.join_with(other._float);
     }
   }
 
@@ -233,6 +260,7 @@ public:
     } else {
       this->_uninitialized.join_loop_with(std::move(other._uninitialized));
       this->_integer.join_loop_with(std::move(other._integer));
+      this->_float.join_loop_with(std::move(other._float));
     }
   }
 
@@ -245,6 +273,7 @@ public:
     } else {
       this->_uninitialized.join_loop_with(other._uninitialized);
       this->_integer.join_loop_with(other._integer);
+      this->_float.join_loop_with(other._float);
     }
   }
 
@@ -258,6 +287,7 @@ public:
     } else {
       this->_uninitialized.join_iter_with(std::move(other._uninitialized));
       this->_integer.join_iter_with(std::move(other._integer));
+      this->_float.join_iter_with(std::move(other._float));
     }
   }
 
@@ -270,6 +300,7 @@ public:
     } else {
       this->_uninitialized.join_iter_with(other._uninitialized);
       this->_integer.join_iter_with(other._integer);
+      this->_float.join_iter_with(other._float);
     }
   }
 
@@ -282,6 +313,7 @@ public:
     } else {
       this->_uninitialized.widen_with(other._uninitialized);
       this->_integer.widen_with(other._integer);
+      this->_float.widen_with(other._float);
     }
   }
 
@@ -295,6 +327,7 @@ public:
     } else {
       this->_uninitialized.widen_with(other._uninitialized);
       this->_integer.widen_threshold_with(other._integer, threshold);
+      this->_float.widen_threshold_with(other._float, threshold);
     }
   }
 
@@ -307,6 +340,7 @@ public:
     } else {
       this->_uninitialized.meet_with(other._uninitialized);
       this->_integer.meet_with(other._integer);
+      this->_float.meet_with(other._float);
     }
   }
 
@@ -319,6 +353,7 @@ public:
     } else {
       this->_uninitialized.narrow_with(other._uninitialized);
       this->_integer.narrow_with(other._integer);
+      this->_float.narrow_with(other._float);
     }
   }
 
@@ -332,6 +367,7 @@ public:
     } else {
       this->_uninitialized.narrow_with(other._uninitialized);
       this->_integer.narrow_threshold_with(other._integer, threshold);
+      this->_float.narrow_threshold_with(other._float, threshold);
     }
   }
 
@@ -805,12 +841,15 @@ public:
     ikos_assert(ScalarVariableTrait::is_float(x));
 
     this->_uninitialized.assign_uninitialized(x);
+    this->_float.forget(x);
   }
 
   void float_assign_nondet(VariableRef x) override {
     ikos_assert(ScalarVariableTrait::is_float(x));
 
     this->_uninitialized.assign_initialized(x);
+    // A nondeterministic value is by definition not a known constant.
+    this->_float.forget(x);
   }
 
   void float_assign(VariableRef x, VariableRef y) override {
@@ -818,12 +857,54 @@ public:
     ikos_assert(ScalarVariableTrait::is_float(y));
 
     this->_uninitialized.assign(x, y);
+    this->_float.assign(x, y);
+  }
+
+  void float_assign_cst(VariableRef x, const FloatingPoint& cst) override {
+    ikos_assert(ScalarVariableTrait::is_float(x));
+
+    this->_uninitialized.assign_initialized(x);
+    this->_float.assign(x, cst);
+  }
+
+  const FloatingPoint* float_get_cst(VariableRef x) const override {
+    return this->_float.get(x);
+  }
+
+  void float_assign_interval(VariableRef x, const core::floating_point::Interval& iv) override {
+    ikos_assert(ScalarVariableTrait::is_float(x));
+
+    this->_uninitialized.assign_initialized(x);
+    this->_float.apply_interval(x, iv);
+  }
+
+  const core::floating_point::Interval* float_get_interval(VariableRef x) const override {
+    return this->_float.get_interval(x);
+  }
+
+  void float_add(IEEEPredicate pred,
+                 VariableRef x,
+                 const FloatingPoint& cst) override {
+    ikos_assert(ScalarVariableTrait::is_float(x));
+
+    this->_uninitialized.assign_initialized(x);
+    this->_float.refine(x, pred, cst);
+  }
+
+  void float_add(IEEEPredicate pred,
+                 const FloatingPoint& cst,
+                 VariableRef x) override {
+    ikos_assert(ScalarVariableTrait::is_float(x));
+
+    this->_uninitialized.assign_initialized(x);
+    this->_float.refine_flipped(x, pred, cst);
   }
 
   void float_forget(VariableRef x) override {
     ikos_assert(ScalarVariableTrait::is_float(x));
 
     this->_uninitialized.forget(x);
+    this->_float.forget(x);
   }
 
   /// @}
@@ -1101,6 +1182,11 @@ public:
 
     this->_uninitialized.assign_uninitialized(x);
     this->_integer.forget(x);
+    // A non-float value now occupies this cell, so any float fact
+    // about it is stale. Without this, type punning (write float,
+    // overwrite with int, read back as float) resurrects the
+    // discarded float. Run #66 introduced the need for this.
+    this->_float.forget(x);
   }
 
   void dynamic_write_nondet(VariableRef x) override {
@@ -1112,6 +1198,11 @@ public:
 
     this->_uninitialized.assign_initialized(x);
     this->_integer.forget(x);
+    // A non-float value now occupies this cell, so any float fact
+    // about it is stale. Without this, type punning (write float,
+    // overwrite with int, read back as float) resurrects the
+    // discarded float. Run #66 introduced the need for this.
+    this->_float.forget(x);
   }
 
   void dynamic_write_int(VariableRef x, const MachineInt& n) override {
@@ -1128,6 +1219,11 @@ public:
     } else {
       this->_integer.assign(x, n.sign_cast(IntVariableTrait::sign(x)));
     }
+    // A non-float value now occupies this cell, so any float fact
+    // about it is stale. Without this, type punning (write float,
+    // overwrite with int, read back as float) resurrects the
+    // discarded float. Run #66 introduced the need for this.
+    this->_float.forget(x);
   }
 
   void dynamic_write_nondet_int(VariableRef x) override {
@@ -1139,6 +1235,11 @@ public:
 
     this->_uninitialized.assign_initialized(x);
     this->_integer.forget(x);
+    // A non-float value now occupies this cell, so any float fact
+    // about it is stale. Without this, type punning (write float,
+    // overwrite with int, read back as float) resurrects the
+    // discarded float. Run #66 introduced the need for this.
+    this->_float.forget(x);
   }
 
   void dynamic_write_int(VariableRef x, VariableRef y) override {
@@ -1157,6 +1258,11 @@ public:
     } else {
       this->_integer.apply(IntUnaryOperator::SignCast, x, y);
     }
+    // A non-float value now occupies this cell, so any float fact
+    // about it is stale. Without this, type punning (write float,
+    // overwrite with int, read back as float) resurrects the
+    // discarded float. Run #66 introduced the need for this.
+    this->_float.forget(x);
   }
 
   void dynamic_write_nondet_float(VariableRef x) override {
@@ -1170,6 +1276,49 @@ public:
     this->_integer.forget(x);
   }
 
+  void dynamic_write_float(VariableRef x, const FloatingPoint& f) override {
+    ikos_assert(ScalarVariableTrait::is_dynamic(x));
+
+    if (this->is_bottom_fast()) {
+      return;
+    }
+
+    // The cell now holds a float, so any integer fact about it is void. Note we
+    // write the float sub-domain directly rather than going through
+    // float_assign_cst, which asserts is_float(x) and so cannot accept a cell
+    // variable.
+    this->_uninitialized.assign_initialized(x);
+    this->_integer.forget(x);
+    if (f.is_modeled()) {
+      this->_float.assign(x, f);
+    } else {
+      this->_float.forget(x);
+    }
+  }
+
+  void dynamic_write_float(VariableRef x, VariableRef y) override {
+    ikos_assert(ScalarVariableTrait::is_dynamic(x));
+
+    if (this->is_bottom_fast()) {
+      return;
+    }
+
+    this->_uninitialized.assign_initialized(x);
+    this->_integer.forget(x);
+    this->_float.assign(x, y);
+  }
+
+  void dynamic_read_float(VariableRef x, VariableRef y) override {
+    ikos_assert(ScalarVariableTrait::is_dynamic(y));
+
+    if (this->is_bottom_fast()) {
+      return;
+    }
+
+    this->_uninitialized.assign(x, y);
+    this->_float.assign(x, y);
+  }
+
   void dynamic_write_null(VariableRef x) override {
     ikos_assert(ScalarVariableTrait::is_dynamic(x));
 
@@ -1179,6 +1328,11 @@ public:
 
     this->_uninitialized.assign_initialized(x);
     this->_integer.forget(x);
+    // A non-float value now occupies this cell, so any float fact
+    // about it is stale. Without this, type punning (write float,
+    // overwrite with int, read back as float) resurrects the
+    // discarded float. Run #66 introduced the need for this.
+    this->_float.forget(x);
   }
 
   void dynamic_write_pointer(VariableRef x,
@@ -1192,6 +1346,11 @@ public:
 
     this->_uninitialized.assign_initialized(x);
     this->_integer.forget(x);
+    // A non-float value now occupies this cell, so any float fact
+    // about it is stale. Without this, type punning (write float,
+    // overwrite with int, read back as float) resurrects the
+    // discarded float. Run #66 introduced the need for this.
+    this->_float.forget(x);
   }
 
   void dynamic_write_pointer(VariableRef x, VariableRef y) override {
@@ -1204,6 +1363,11 @@ public:
 
     this->_uninitialized.assign(x, y);
     this->_integer.forget(x);
+    // A non-float value now occupies this cell, so any float fact
+    // about it is stale. Without this, type punning (write float,
+    // overwrite with int, read back as float) resurrects the
+    // discarded float. Run #66 introduced the need for this.
+    this->_float.forget(x);
   }
 
   void dynamic_read_int(VariableRef x, VariableRef y) override {
@@ -1347,6 +1511,8 @@ public:
       this->_uninitialized.dump(o);
       o << ", ";
       this->_integer.dump(o);
+      o << ", ";
+      this->_float.dump(o);
       o << ")";
     }
   }

@@ -386,6 +386,34 @@ public:
     this->_scalar.float_assign_nondet(x);
   }
 
+  void float_assign_cst(VariableRef x, const FloatingPoint& cst) override {
+    this->_scalar.float_assign_cst(x, cst);
+  }
+
+  const FloatingPoint* float_get_cst(VariableRef x) const override {
+    return this->_scalar.float_get_cst(x);
+  }
+
+  void float_assign_interval(VariableRef x, const core::floating_point::Interval& iv) override {
+    this->_scalar.float_assign_interval(x, iv);
+  }
+
+  const core::floating_point::Interval* float_get_interval(VariableRef x) const override {
+    return this->_scalar.float_get_interval(x);
+  }
+
+  void float_add(IEEEPredicate pred,
+                 VariableRef x,
+                 const FloatingPoint& cst) override {
+    this->_scalar.float_add(pred, x, cst);
+  }
+
+  void float_add(IEEEPredicate pred,
+                 const FloatingPoint& cst,
+                 VariableRef x) override {
+    this->_scalar.float_add(pred, cst, x);
+  }
+
   void float_assign(VariableRef x, VariableRef y) override {
     this->_scalar.float_assign(x, y);
   }
@@ -553,6 +581,18 @@ public:
 
   void dynamic_write_nondet_float(VariableRef x) override {
     this->_scalar.dynamic_write_nondet_float(x);
+  }
+
+  void dynamic_write_float(VariableRef x, const FloatingPoint& f) override {
+    this->_scalar.dynamic_write_float(x, f);
+  }
+
+  void dynamic_write_float(VariableRef x, VariableRef y) override {
+    this->_scalar.dynamic_write_float(x, y);
+  }
+
+  void dynamic_read_float(VariableRef x, VariableRef y) override {
+    this->_scalar.dynamic_read_float(x, y);
   }
 
   void dynamic_write_null(VariableRef x) override {

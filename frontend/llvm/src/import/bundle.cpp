@@ -310,6 +310,74 @@ ar::Function* BundleImporter::translate_intrinsic_function(
     ar_fun = this->_bundle->intrinsic_function(ar::Intrinsic::EhTypeidFor);
   } else if (id == llvm::Intrinsic::trap) {
     ar_fun = this->_bundle->intrinsic_function(ar::Intrinsic::Trap);
+  } else if (id == llvm::Intrinsic::fmuladd || id == llvm::Intrinsic::fma ||
+             id == llvm::Intrinsic::fabs || id == llvm::Intrinsic::maxnum ||
+             id == llvm::Intrinsic::minnum || id == llvm::Intrinsic::floor ||
+             id == llvm::Intrinsic::ceil || id == llvm::Intrinsic::trunc ||
+             id == llvm::Intrinsic::sqrt || id == llvm::Intrinsic::round ||
+             id == llvm::Intrinsic::rint || id == llvm::Intrinsic::copysign) {
+    // All polymorphic: the operand type decides the AR signature, so carry it
+    // through to the call site. They are NOT interchangeable -- fma is always
+    // fused, fmuladd only may be, fabs is a different operation entirely,
+    // maxnum/minnum absorb NaN rather than propagating it, and floor/ceil/trunc
+    // round to an integer-valued float -- so each maps to its own AR intrinsic
+    // and the analyzer treats them differently.
+    llvm::Type* lt = fun->getArg(0)->getType();
+    ar::FloatSemantic sem = ar::Double;
+    if (lt->isHalfTy()) {
+      sem = ar::Half;
+    } else if (lt->isFloatTy()) {
+      sem = ar::Float;
+    } else if (lt->isDoubleTy()) {
+      sem = ar::Double;
+    } else if (lt->isX86_FP80Ty()) {
+      sem = ar::X86_FP80;
+    } else if (lt->isFP128Ty()) {
+      sem = ar::FP128;
+    } else if (lt->isPPC_FP128Ty()) {
+      sem = ar::PPC_FP128;
+    }
+    ar::Intrinsic::ID ar_id;
+    switch (id) {
+    case llvm::Intrinsic::fma:
+      ar_id = ar::Intrinsic::FloatFma;
+      break;
+    case llvm::Intrinsic::fabs:
+      ar_id = ar::Intrinsic::FloatAbs;
+      break;
+    case llvm::Intrinsic::maxnum:
+      ar_id = ar::Intrinsic::FloatMaxnum;
+      break;
+    case llvm::Intrinsic::minnum:
+      ar_id = ar::Intrinsic::FloatMinnum;
+      break;
+    case llvm::Intrinsic::floor:
+      ar_id = ar::Intrinsic::FloatFloor;
+      break;
+    case llvm::Intrinsic::ceil:
+      ar_id = ar::Intrinsic::FloatCeil;
+      break;
+    case llvm::Intrinsic::trunc:
+      ar_id = ar::Intrinsic::FloatTrunc;
+      break;
+    case llvm::Intrinsic::sqrt:
+      ar_id = ar::Intrinsic::FloatSqrt;
+      break;
+    case llvm::Intrinsic::round:
+      ar_id = ar::Intrinsic::FloatRound;
+      break;
+    case llvm::Intrinsic::rint:
+      ar_id = ar::Intrinsic::FloatRint;
+      break;
+    case llvm::Intrinsic::copysign:
+      ar_id = ar::Intrinsic::FloatCopysign;
+      break;
+    default:
+      ar_id = ar::Intrinsic::FloatFmuladd;
+      break;
+    }
+    ar_fun = this->_bundle->intrinsic_function(
+        ar_id, ar::FloatType::get(_context, sem));
   } else {
     // No equivalent AR intrinsic, translate into a normal external function
     ar_fun = nullptr;

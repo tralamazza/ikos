@@ -1036,6 +1036,56 @@ public:
     }
   }
 
+  void float_assign_cst(VariableRef x, const FloatingPoint& cst) override {
+    for (Partition& partition : this->_partitions) {
+      partition.memory.float_assign_cst(x, cst);
+    }
+  }
+
+  const FloatingPoint* float_get_cst(VariableRef x) const override {
+    const FloatingPoint* found = nullptr;
+    for (const Partition& partition : this->_partitions) {
+      const FloatingPoint* c = partition.memory.float_get_cst(x);
+      if (c != nullptr) {
+        found = c;
+      }
+    }
+    return found;
+  }
+
+  void float_assign_interval(VariableRef x, const core::floating_point::Interval& iv) override {
+    for (Partition& partition : this->_partitions) {
+      partition.memory.float_assign_interval(x, iv);
+    }
+  }
+
+  const core::floating_point::Interval* float_get_interval(VariableRef x) const override {
+    const core::floating_point::Interval* found = nullptr;
+    for (const Partition& partition : this->_partitions) {
+      const core::floating_point::Interval* iv = partition.memory.float_get_interval(x);
+      if (iv != nullptr) {
+        found = iv;
+      }
+    }
+    return found;
+  }
+
+  void float_add(IEEEPredicate pred,
+                 VariableRef x,
+                 const FloatingPoint& cst) override {
+    for (Partition& partition : this->_partitions) {
+      partition.memory.float_add(pred, x, cst);
+    }
+  }
+
+  void float_add(IEEEPredicate pred,
+                 const FloatingPoint& cst,
+                 VariableRef x) override {
+    for (Partition& partition : this->_partitions) {
+      partition.memory.float_add(pred, cst, x);
+    }
+  }
+
   void float_assign(VariableRef x, VariableRef y) override {
     for (Partition& partition : this->_partitions) {
       partition.memory.float_assign(x, y);
@@ -1314,6 +1364,24 @@ public:
   void dynamic_write_nondet_float(VariableRef x) override {
     for (Partition& partition : this->_partitions) {
       partition.memory.dynamic_write_nondet_float(x);
+    }
+  }
+
+  void dynamic_write_float(VariableRef x, const FloatingPoint& f) override {
+    for (Partition& partition : this->_partitions) {
+      partition.memory.dynamic_write_float(x, f);
+    }
+  }
+
+  void dynamic_write_float(VariableRef x, VariableRef y) override {
+    for (Partition& partition : this->_partitions) {
+      partition.memory.dynamic_write_float(x, y);
+    }
+  }
+
+  void dynamic_read_float(VariableRef x, VariableRef y) override {
+    for (Partition& partition : this->_partitions) {
+      partition.memory.dynamic_read_float(x, y);
     }
   }
 

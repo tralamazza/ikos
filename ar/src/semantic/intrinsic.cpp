@@ -144,6 +144,59 @@ FunctionType* Intrinsic::type(Bundle* bundle, ID id, Type* template_ty) {
     case Trap: {
       ret_ty = void_ty; // ret
     } break;
+    case FloatFmuladd: {
+      // (T, T, T) -> T, where T is the float semantic the call site used.
+      ikos_assert(template_ty != nullptr);
+      ret_ty = template_ty;          // ret
+      params.push_back(template_ty); // a
+      params.push_back(template_ty); // b
+      params.push_back(template_ty); // c
+    } break;
+    case FloatFma: {
+      // Same signature as FloatFmuladd; only the fusion guarantee differs.
+      ikos_assert(template_ty != nullptr);
+      ret_ty = template_ty;          // ret
+      params.push_back(template_ty); // a
+      params.push_back(template_ty); // b
+      params.push_back(template_ty); // c
+    } break;
+    case FloatAbs: {
+      // (T) -> T, where T is the float semantic the call site used.
+      ikos_assert(template_ty != nullptr);
+      ret_ty = template_ty;          // ret
+      params.push_back(template_ty); // operand
+    } break;
+    case FloatMaxnum:
+    case FloatMinnum: {
+      // (T, T) -> T, where T is the float semantic the call site used.
+      ikos_assert(template_ty != nullptr);
+      ret_ty = template_ty;          // ret
+      params.push_back(template_ty); // a
+      params.push_back(template_ty); // b
+    } break;
+    case FloatFloor:
+    case FloatCeil:
+    case FloatTrunc:
+    case FloatRound:
+    case FloatRint: {
+      // (T) -> T, where T is the float semantic the call site used.
+      ikos_assert(template_ty != nullptr);
+      ret_ty = template_ty;          // ret
+      params.push_back(template_ty); // operand
+    } break;
+    case FloatCopysign: {
+      // (T, T) -> T: magnitude of the first, sign bit of the second.
+      ikos_assert(template_ty != nullptr);
+      ret_ty = template_ty;          // ret
+      params.push_back(template_ty); // magnitude source
+      params.push_back(template_ty); // sign source
+    } break;
+    case FloatSqrt: {
+      // (T) -> T, where T is the float semantic the call site used.
+      ikos_assert(template_ty != nullptr);
+      ret_ty = template_ty;          // ret
+      params.push_back(template_ty); // operand
+    } break;
     // <ikos/analyzer/intrinsic.h>
     case IkosAssert: {
       ret_ty = void_ty;          // ret
@@ -621,6 +674,38 @@ std::string Intrinsic::short_name(ID id, Type* template_ty) {
       return "eh.typeid.for";
     case Trap:
       return "trap";
+    // These are polymorphic: the operand type decides the AR signature, so the
+    // width MUST be part of the name. Bundle::intrinsic_function caches by name,
+    // so a width-blind name makes the first-registered width win: a file using
+    // both fabsf and fabs would look up ar.float.abs for the second call, get the
+    // (float)->float function cached from the first, and fail the frontend's
+    // signature sanity check with "llvm intrinsic llvm.fabs.f64 and ar intrinsic
+    // ar.float.abs have a different type". Same for sqrtf/sqrt, fmaf/fma, etc.
+    // Mirrors how IkosNonDet and IkosPartitioningVar key on template type.
+    case FloatFmuladd:
+      return "float.fmuladd." + template_type_name(template_ty);
+    case FloatFma:
+      return "float.fma." + template_type_name(template_ty);
+    case FloatAbs:
+      return "float.abs." + template_type_name(template_ty);
+    case FloatMaxnum:
+      return "float.maxnum." + template_type_name(template_ty);
+    case FloatMinnum:
+      return "float.minnum." + template_type_name(template_ty);
+    case FloatFloor:
+      return "float.floor." + template_type_name(template_ty);
+    case FloatCeil:
+      return "float.ceil." + template_type_name(template_ty);
+    case FloatTrunc:
+      return "float.trunc." + template_type_name(template_ty);
+    case FloatRound:
+      return "float.round." + template_type_name(template_ty);
+    case FloatRint:
+      return "float.rint." + template_type_name(template_ty);
+    case FloatCopysign:
+      return "float.copysign." + template_type_name(template_ty);
+    case FloatSqrt:
+      return "float.sqrt." + template_type_name(template_ty);
     // <ikos/analyzer/intrinsic.h>
     case IkosAssert:
       return "ikos.assert";
