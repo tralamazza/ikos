@@ -1136,6 +1136,27 @@ static bool has_no_member(Iterator begin, Iterator end) {
     } else if (llvm::isa< llvm::DIDerivedType >(t)) {
       auto di_member = llvm::cast< llvm::DIDerivedType >(t);
       if (di_member->getTag() == dwarf::DW_TAG_member) {
+        // A non-static data member whose type is an empty class occupies no
+        // storage: the empty base optimization drops it from the LLVM struct
+        // entirely, while debug info still lists it. Counting it as a member
+        // makes the importer see a field the LLVM struct does not have, which
+        // is what made std::unique_ptr<bool> fail -- _Head_base<1,
+        // default_delete<bool>, true> declares _M_head_impl of empty type
+        // default_delete<bool>, so the LLVM struct is just `{ ptr }`.
+        llvm::DIType* mb = llvm::dyn_cast_or_null< llvm::DIType>(
+            di_member->getRawBaseType());
+        if (mb != nullptr) {
+          if (auto* comp = llvm::dyn_cast< llvm::DICompositeType >(mb)) {
+            // Only class and struct types have a member list; arrays and
+            // enumerations carry DISubrange / DIEnumerator nodes instead,
+            // which has_no_member cannot interpret.
+            auto tag = comp->getTag();
+            if (tag == dwarf::DW_TAG_class_type ||
+                tag == dwarf::DW_TAG_structure_type) {
+              return is_empty_composite(comp);
+            }
+          }
+        }
         return false;
       } else if (di_member->getTag() == dwarf::DW_TAG_inheritance) {
         return is_empty_composite(get_composite_parent(di_member));
