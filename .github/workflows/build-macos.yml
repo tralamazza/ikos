@@ -16,6 +16,11 @@ jobs:
       - name: Install dependencies
         run: |
           brew tap nasa-sw-vnv/core
+          # Homebrew 6.x refuses to load formulae from third-party taps until
+          # they are explicitly trusted; without this the run dies with
+          # "Refusing to load formula nasa-sw-vnv/core/apron from untrusted
+          # tap" before anything is built.
+          brew trust nasa-sw-vnv/core
           brew install cmake gmp boost tbb llvm@18 apron sqlite
       - name: Adjust path
         run:
