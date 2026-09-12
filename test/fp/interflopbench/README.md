@@ -28,11 +28,18 @@ and timeouts. This is the load-bearing check for the "total intrinsic switch"
 work: an unhandled float intrinsic traps, so a clean sweep means the dispatch
 covers everything this suite emits.
 
-Result: **92/93 clean, 0 traps, 0 timeouts.**
+Result on arm64 macOS: **92/93 clean, 0 traps, 0 timeouts.**
+Result on an x86_64 target: **93/93 clean, 0 traps, 0 timeouts.**
 
-The one failure is a benchmark portability problem, not an IKOS problem:
-`33_subnormal_func1` includes `<xmmintrin.h>`, which hard-errors on arm64. It
-is classified `compile-error` and excluded from the robustness denominator.
+The one arm64 failure is a benchmark portability problem, not an IKOS problem:
+`33_subnormal_func1` includes `<xmmintrin.h>`, which hard-errors with
+`"This header is only meant to be used on x86 and x64 architecture"`. Under an
+x86_64 target that header is fine, so the benchmark compiles and the sweep is
+clean. It is classified `compile-error` and excluded from the robustness
+denominator.
+
+Note this result is **platform-specific and was previously written here as if it
+were universal.** The suite must be read per-target, not as one number.
 
 ## Tier 2 — soundness and precision (91 benchmarks, 1133 input vectors)
 
@@ -60,16 +67,18 @@ truth × IKOS verdict gives one label per case:
 Only the two `UNSAT_*` labels are bugs. Everything else is a coverage or
 precision measurement.
 
-### Result after both fixes
+### Current result (1133 input vectors, 2266 verdicts)
 
 ```
-nan_free:  CORRECT 347   DETECTED 6    MISSED 14   IMPRECISE 581
-finite:    CORRECT 245   DETECTED 22   MISSED 122  IMPRECISE 559
+nan_free:  CORRECT 419   DETECTED 8    MISSED 49   IMPRECISE 657
+finite:    CORRECT 314   DETECTED 26   MISSED 175  IMPRECISE 618
 
-No unsound results across 1896 verdicts.
+No unsound results across 2266 verdicts.
 ```
 
 ### Result at HEAD (bc915ee..8f9c8bc), before the fixes
+
+948-vector era, before the Tier 2 generalisation, so the totals are smaller:
 
 ```
 nan_free:  CORRECT 347   DETECTED 0    MISSED 20   IMPRECISE 581
@@ -78,7 +87,7 @@ finite:    CORRECT 245   DETECTED 16   MISSED 128  IMPRECISE 559
 No unsound results across 1896 verdicts.
 ```
 
-**The headline: zero unsoundness.** Across 948 concrete vectors the FP domain
+**The headline: zero unsoundness.** Across 1133 concrete vectors the FP domain
 never proved a false property and never refuted a true one. That is the claim
 the FP work most needs to survive, and it does.
 
@@ -263,13 +272,23 @@ The probe now reads the AR trace instead, and splits into three buckets so the
 vacuous case is visible rather than folded into "modelled":
 
 ```
-probed=92  fully-modeled=27  opaque=40  no-libm=25  probe-failed=1
-every should-be-modeled call reached an AR float intrinsic.
+arm64 macOS
+  probed=92  fully-modeled=27  opaque=40  no-libm=25  probe-failed=1
+
+x86_64 Linux-shaped IR (--target=x86_64-unknown-linux-gnu)
+  probed=93  fully-modeled=27  opaque=40  no-libm=26  probe-failed=0
+
+every should-be-modeled call reached an AR float intrinsic, on both.
 
 nan_free  modeled = {CORRECT 298, DETECTED 8, IMPRECISE 32, MISSED 3}
 nan_free  opaque  = {IMPRECISE 514, MISSED 37}
 nan_free  no-libm = {CORRECT 121, IMPRECISE 111, MISSED 9}
 ```
+
+The `modeled` tallies are **identical on both targets**, which is the first
+direct confirmation that the libm-name mapping delivers the same modelling on
+x86_64 Linux that the intrinsic path delivers on Darwin. Before the probe this
+could only be inferred.
 
 The split is now sharp in a way it was not before: **every** `CORRECT` and
 `DETECTED` result lives in the modelled bucket; the opaque bucket has none.
@@ -382,10 +401,16 @@ Stated plainly so the numbers are not over-read:
   asserted properties hold for them, so IKOS has nothing to say. 59 of 93
   benchmarks have ground truth drawn only from these classes.
 * **Round-off magnitude / condition number** — nothing in IKOS measures these.
-* **`div_zero`** — no reporter (finding 3).
-* Tier 2 covers 62 of 93 benchmarks. The other 31 have multi-argument,
-  pointer, or array kernels that the driver generator does not handle. Tier 1
-  still covers all 93 for robustness.
+* **`div_zero`** — covered by the opt-in `fpz` checker (finding 3), not by
+  `dbz`, which stays integer-only by design. `fpz` is off by default because on
+  a general-purpose target float divide-by-zero is defined behaviour.
+* Tier 2 covers **91 of 93** benchmarks. The two exceptions are
+  `13_cancellation` (ground truth carries no values for its out-parameter
+  array) and `62_possiblenan` (returns `const char*`; NaN and finiteness are
+  not properties of a string). Tier 1 still covers all 93 for robustness.
+* **The numbers are per-target.** Tier 1, the probe buckets and the compile-error
+  count all move with the target triple. A single number here is meaningless
+  without saying which target produced it.
 
 ## Reproducing / CI
 
@@ -492,8 +517,8 @@ regression class -- see finding 1, which is that bug and was caught this way.
 A dedicated NaN case in `Interval` would touch every operation for a bug that
 is already observable.
 
-**Modelling more libm -- no, not for coverage.** 581 of 948 `nan_free` cases
-are `IMPRECISE` because `exp`/`sin`/`cos`/`expm1`/`tgamma` are opaque externs.
+**Modelling more libm -- no, not for coverage.** 514 of 1133 `nan_free` cases
+are `IMPRECISE` with the math left opaque (`exp`/`sin`/`cos`/`expm1`/`tgamma`).
 Sound outward-rounded interval images for those are hard, and the risk is
 asymmetric: a wrong `exp` image is worse than no `exp` image, because a wrong
 image is the unsoundness this harness exists to catch. Model one only when a

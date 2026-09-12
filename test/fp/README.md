@@ -25,6 +25,12 @@ This directory makes what can be recovered reproducible, and records what cannot
 |---|---|---|
 | `fp_diff_check_nan_identity.py` | **reconstructed, passing** | `x P x` for all 14 IEEE predicates, in NaN and ordered contexts, via hand-written LLVM IR |
 | `recovered_docstrings.txt` | **recovered verbatim** | the docstrings of all six original validators |
+| `interflopbench/` | **new, in ctest** | 93 third-party FP benchmarks across three tiers: robustness, soundness/precision against ground truth, and `fpz` recall. See `interflopbench/README.md`. |
+
+The InterflopBench harness is the larger and more load-bearing of the two: it is
+external ground truth rather than our own assertion about ourselves, and it runs
+on every build as ctest test `interflopbench`. The validator above is still
+worth running by hand but is not wired into ctest.
 
 Run it:
 
@@ -100,7 +106,8 @@ differential (`fp_diff_check_storage`). They were not rebuilt because:
 3. **The highest-value coverage now lives in ctest.** `analyzer/test/regression/
    fp/` holds the crash regression, the IEEE rounding tests and the `f2i` tier
    tests, wired into `ctest` as `analysis-float`, each with guard liveness
-   verified. Those run on every build; these do not.
+   verified, and `interflopbench/` runs as its own ctest test. Those run on
+   every build; the validator in this file does not.
 
 Their docstrings are preserved in `recovered_docstrings.txt`, which records the
 trap classes they targeted and the reasoning, so the knowledge is not lost even
@@ -113,3 +120,17 @@ and treat each as unproven until it has been shown to fail against a deliberatel
 broken build. Start with `fp_fuzz_nd` — its docstring describes the simplest
 oracle (random expression, random guard, compare IKOS's verdict against Python's
 own evaluation), so a wrong reconstruction is easiest to spot.
+
+## One lesson that applies to every number in this directory
+
+**FP results are target-dependent. Always say which target produced them.**
+
+Whether `math.h` arrives as an LLVM intrinsic or a plain library call is decided
+by `-fmath-errno`, whose default differs by target: Apple/AArch64 default to
+`-fno-math-errno` (intrinsic), x86_64 Linux defaults to `-fmath-errno` (library
+call). That single difference made the entire FP model inert on x86_64 Linux while
+everything still looked fine on macOS.
+
+An earlier revision of the InterflopBench README wrote "92/93 clean" as if it were
+a property of the suite. It was a property of arm64 macOS; the x86_64 result is
+93/93. Read every figure here as *target + result*, never as a bare number.
