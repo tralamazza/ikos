@@ -94,3 +94,23 @@ jobs:
         run: |
           cd build
           ctest --output-on-failure
+
+      # ctest hides a passing test's stdout, so the InterflopBench scorecard --
+      # the only place the modelling coverage and precision tallies appear --
+      # used to vanish on every green run. The exit-code guards still fire on a
+      # regression, but nothing showed the numbers, so slow shrinkage was
+      # invisible. always(): a failed run is exactly when we want the table.
+      - name: Summarise InterflopBench
+        if: always()
+        run: |
+          python3 test/fp/interflopbench/ci_summary.py \
+            "${{ github.workspace }}/build/interflopbench-report.json"
+
+      - name: Upload InterflopBench report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interflopbench-report-macos
+          path: build/interflopbench-report.json
+          if-no-files-found: ignore
+          retention-days: 30

@@ -47,5 +47,13 @@ add_test(NAME "interflopbench"
            --clang "${CLANG_EXECUTABLE}"
            --ikos-pp "${FRONTEND_LLVM_IKOS_PP_EXECUTABLE}"
            --ikos-analyzer "$<TARGET_FILE:ikos-analyzer>"
-           --jobs 4)
+           --jobs 4
+           --report "${CMAKE_BINARY_DIR}/interflopbench-report.json")
 set_tests_properties(interflopbench PROPERTIES SKIP_RETURN_CODE 77)
+
+# The report path is advertised so CI can surface the tallies without knowing
+# the build tree layout. ctest hides a passing test's stdout, so without this
+# the numbers exist for ninety seconds on a runner and then vanish.
+set(INTERFLOPBENCH_REPORT "${CMAKE_BINARY_DIR}/interflopbench-report.json"
+    CACHE FILEPATH "Where the interflopbench harness writes its JSON report")
+

@@ -337,6 +337,27 @@ class _Tool:
     pass
 
 
+def tool_meta(tool):
+    """Describe what produced this report.
+
+    Every FP number here is target-dependent -- the -fmath-errno default alone
+    changes whether the model applies at all -- so a report without its target
+    is a bare number waiting to be misread.
+    """
+    meta = {"platform": sys.platform, "mode": tool.mode}
+    clang = getattr(tool, "clang_flags", [None])[0]
+    if clang:
+        meta["clang"] = clang
+        try:
+            meta["target_triple"] = subprocess.run(
+                [clang, "-dumpmachine"], capture_output=True, text=True,
+                timeout=60).stdout.strip()
+        except Exception as e:            # not worth failing a run over
+            meta["target_triple"] = "unknown: %s" % e
+    meta["ikos_analyzer"] = getattr(tool, "ikos_analyzer", None)
+    return meta
+
+
 def discover(bench_dir):
     out = []
     for name in sorted(os.listdir(bench_dir)):
@@ -1009,7 +1030,8 @@ def main():
     # Write the report before printing so a reporting bug cannot lose the data.
     if args.report:
         with open(args.report, "w") as f:
-            json.dump({"tier1": t1, "tier2": t2, "tier3": t3, "probes": probes},
+            json.dump({"meta": tool_meta(tool),
+                       "tier1": t1, "tier2": t2, "tier3": t3, "probes": probes},
                       f, indent=1)
         eprint("report written to %s" % args.report)
 
