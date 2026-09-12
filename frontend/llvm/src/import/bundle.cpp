@@ -236,6 +236,112 @@ ar::Function* BundleImporter::translate_function_di(llvm::Function* fun,
                               /*is_definition = */ !fun->isDeclaration());
 }
 
+namespace {
+
+/// \brief Map an LLVM floating-point type onto the matching AR float semantics.
+///
+/// Shared by the LLVM-intrinsic branch and the libm name mapping below so the
+/// two cannot drift apart on which widths they recognise.
+ar::FloatSemantic ar_float_sem_from_llvm(llvm::Type* lt) {
+  if (lt->isHalfTy()) {
+    return ar::Half;
+  } else if (lt->isFloatTy()) {
+    return ar::Float;
+  } else if (lt->isDoubleTy()) {
+    return ar::Double;
+  } else if (lt->isX86_FP80Ty()) {
+    return ar::X86_FP80;
+  } else if (lt->isFP128Ty()) {
+    return ar::FP128;
+  } else if (lt->isPPC_FP128Ty()) {
+    return ar::PPC_FP128;
+  }
+  return ar::Double;
+}
+
+struct LibmEntry {
+  const char* name;
+  ar::Intrinsic::ID id;
+  unsigned arity;
+};
+
+/// math.h entry points that have an equivalent AR floating-point intrinsic.
+///
+/// The `f` and `l` suffix variants are listed explicitly because for a
+/// non-intrinsic call the C name is all that survives into the bitcode. The
+/// float width is taken from the LLVM operand type rather than from the
+/// suffix, so a declaration whose suffix and type disagree cannot smuggle in
+/// the wrong semantics.
+///
+/// Only operations the analyzer actually models appear here. `fmod`, `exp`,
+/// `sin` and the rest deliberately stay opaque: inventing an image for a
+/// function we have not validated is worse than saying nothing about it.
+const LibmEntry kLibmTable[] = {
+    {"fabs", ar::Intrinsic::FloatAbs, 1},
+    {"fabsf", ar::Intrinsic::FloatAbs, 1},
+    {"fabsl", ar::Intrinsic::FloatAbs, 1},
+
+    {"sqrt", ar::Intrinsic::FloatSqrt, 1},
+    {"sqrtf", ar::Intrinsic::FloatSqrt, 1},
+    {"sqrtl", ar::Intrinsic::FloatSqrt, 1},
+
+    {"log", ar::Intrinsic::FloatLog, 1},
+    {"logf", ar::Intrinsic::FloatLog, 1},
+    {"logl", ar::Intrinsic::FloatLog, 1},
+
+    {"log2", ar::Intrinsic::FloatLog2, 1},
+    {"log2f", ar::Intrinsic::FloatLog2, 1},
+    {"log2l", ar::Intrinsic::FloatLog2, 1},
+
+    {"log10", ar::Intrinsic::FloatLog10, 1},
+    {"log10f", ar::Intrinsic::FloatLog10, 1},
+    {"log10l", ar::Intrinsic::FloatLog10, 1},
+
+    {"pow", ar::Intrinsic::FloatPow, 2},
+    {"powf", ar::Intrinsic::FloatPow, 2},
+    {"powl", ar::Intrinsic::FloatPow, 2},
+
+    {"floor", ar::Intrinsic::FloatFloor, 1},
+    {"floorf", ar::Intrinsic::FloatFloor, 1},
+    {"floorl", ar::Intrinsic::FloatFloor, 1},
+
+    {"ceil", ar::Intrinsic::FloatCeil, 1},
+    {"ceilf", ar::Intrinsic::FloatCeil, 1},
+    {"ceill", ar::Intrinsic::FloatCeil, 1},
+
+    {"trunc", ar::Intrinsic::FloatTrunc, 1},
+    {"truncf", ar::Intrinsic::FloatTrunc, 1},
+    {"truncl", ar::Intrinsic::FloatTrunc, 1},
+
+    {"round", ar::Intrinsic::FloatRound, 1},
+    {"roundf", ar::Intrinsic::FloatRound, 1},
+    {"roundl", ar::Intrinsic::FloatRound, 1},
+
+    {"rint", ar::Intrinsic::FloatRint, 1},
+    {"rintf", ar::Intrinsic::FloatRint, 1},
+    {"rintl", ar::Intrinsic::FloatRint, 1},
+
+    {"copysign", ar::Intrinsic::FloatCopysign, 2},
+    {"copysignf", ar::Intrinsic::FloatCopysign, 2},
+    {"copysignl", ar::Intrinsic::FloatCopysign, 2},
+
+    {"fma", ar::Intrinsic::FloatFma, 3},
+    {"fmaf", ar::Intrinsic::FloatFma, 3},
+    {"fmal", ar::Intrinsic::FloatFma, 3},
+
+    // C99 fmax/fmin return the numeric value of the non-NaN argument, which
+    // is llvm.maxnum's absorb-NaN behaviour, not a plain comparison.
+    {"fmax", ar::Intrinsic::FloatMaxnum, 2},
+    {"fmaxf", ar::Intrinsic::FloatMaxnum, 2},
+    {"fmaxl", ar::Intrinsic::FloatMaxnum, 2},
+
+    {"fmin", ar::Intrinsic::FloatMinnum, 2},
+    {"fminf", ar::Intrinsic::FloatMinnum, 2},
+    {"fminl", ar::Intrinsic::FloatMinnum, 2},
+};
+
+} // end anonymous namespace
+
 ar::Function* BundleImporter::translate_extern_function(llvm::Function* fun) {
   ikos_assert(fun->isDeclaration());
 
@@ -256,6 +362,25 @@ ar::Function* BundleImporter::translate_extern_function(llvm::Function* fun) {
   // Translate known library functions (e.g, malloc, printf, etc.)
   if (ar_fun == nullptr) {
     ar_fun = this->translate_library_function(fun);
+  }
+
+  // libm entry points that arrived as plain calls rather than LLVM intrinsics.
+  //
+  // Whether math.h reaches the frontend as `llvm.log.f64` or as `call @log`
+  // is decided by -fmath-errno, and that default is target-dependent: Apple
+  // and AArch64 default to -fno-math-errno and emit the intrinsic, while
+  // x86_64 Linux defaults to -fmath-errno and emits the library call. On
+  // x86_64 Linux the intrinsic branch above therefore never fires, and every
+  // modelled operation would silently degrade to an opaque extern -- leaving
+  // the analyzer's entire floating-point domain inert on the platform most
+  // users run it on. Routing the recognised names onto the same AR
+  // intrinsics makes the modelling apply however the compiler spelled the
+  // call. Verified with a single-variable experiment on one clang build:
+  //   --target=arm64-apple-darwin            -> llvm.log.f64
+  //   --target=x86_64-unknown-linux-gnu      -> @log
+  //   --target=x86_64-unknown-linux-gnu -fno-math-errno -> llvm.log.f64
+  if (ar_fun == nullptr) {
+    ar_fun = this->translate_libm_intrinsic(fun);
   }
 
   if (ar_fun == nullptr) {
@@ -325,20 +450,7 @@ ar::Function* BundleImporter::translate_intrinsic_function(
     // round to an integer-valued float -- so each maps to its own AR intrinsic
     // and the analyzer treats them differently.
     llvm::Type* lt = fun->getArg(0)->getType();
-    ar::FloatSemantic sem = ar::Double;
-    if (lt->isHalfTy()) {
-      sem = ar::Half;
-    } else if (lt->isFloatTy()) {
-      sem = ar::Float;
-    } else if (lt->isDoubleTy()) {
-      sem = ar::Double;
-    } else if (lt->isX86_FP80Ty()) {
-      sem = ar::X86_FP80;
-    } else if (lt->isFP128Ty()) {
-      sem = ar::FP128;
-    } else if (lt->isPPC_FP128Ty()) {
-      sem = ar::PPC_FP128;
-    }
+    ar::FloatSemantic sem = ar_float_sem_from_llvm(lt);
     ar::Intrinsic::ID ar_id;
     switch (id) {
     case llvm::Intrinsic::fmuladd:
@@ -417,6 +529,42 @@ ar::Function* BundleImporter::translate_intrinsic_function(
   }
 
   return ar_fun;
+}
+
+ar::Function* BundleImporter::translate_libm_intrinsic(llvm::Function* fun) {
+  const LibmEntry* entry = nullptr;
+  for (const LibmEntry& e : kLibmTable) {
+    if (fun->getName() == e.name) {
+      entry = &e;
+      break;
+    }
+  }
+  if (entry == nullptr) {
+    return nullptr;
+  }
+
+  llvm::FunctionType* ft = fun->getFunctionType();
+  if (ft->isVarArg() || ft->getNumParams() != entry->arity) {
+    return nullptr;
+  }
+
+  // Every parameter and the return must be the very same floating-point type.
+  // A function that merely shares a name with a libm entry point but does not
+  // look like `T op(T...)` is not that entry point, and keeps its own
+  // translation rather than being silently reinterpreted.
+  llvm::Type* ret_ty = ft->getReturnType();
+  if (!ret_ty->isFloatingPointTy()) {
+    return nullptr;
+  }
+  for (llvm::Type* pt : ft->params()) {
+    if (pt != ret_ty) {
+      return nullptr;
+    }
+  }
+
+  ar::FloatSemantic sem = ar_float_sem_from_llvm(ret_ty);
+  return this->_bundle->intrinsic_function(entry->id,
+                                         ar::FloatType::get(_context, sem));
 }
 
 ar::Function* BundleImporter::translate_library_function(llvm::Function* fun) {
