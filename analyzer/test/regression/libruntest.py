@@ -206,6 +206,31 @@ def clang_ikos_flags():
     ]
 
 
+def run_checked(cmd):
+    ''' Run a pipeline command, surfacing its output if it failed.
+
+    The call sites used `subprocess.check_call(cmd, stdout=PIPE, stderr=PIPE)`,
+    which captures the analyzer's own diagnostics and then throws them away when
+    the exit status is non-zero. That is the single most useful piece of
+    information when a test fails on a platform you cannot reproduce locally --
+    on Linux CI two fp tests failed with no detail whatsoever while passing on
+    macOS. Print the command, its exit code and both streams before re-raising.
+    '''
+    proc = subprocess.run(cmd,
+                         stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE,
+                         universal_newlines=True)
+    if proc.returncode != 0:
+        sys.stderr.write('\ncommand failed with exit code {}: {}\n'.format(
+            proc.returncode, ' '.join(cmd)))
+        for label, stream in (('stderr', proc.stderr), ('stdout', proc.stdout)):
+            if stream and stream.strip():
+                sys.stderr.write('--- {} ---\n{}--- end {} ---\n'.format(
+                    label, stream, label))
+        sys.stderr.flush()
+        raise subprocess.CalledProcessError(proc.returncode, cmd)
+
+
 class Result:
     OK = 0
     WARNING = 1
@@ -292,9 +317,7 @@ class Test:
         cmd += [fullpath, '-o', bc_path]
         if self.filename.endswith('.cpp'):
             cmd.append('-std=c++17')
-        subprocess.check_call(cmd,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
+        run_checked(cmd)
 
         # run ikos preprocessor
         pp_path = os.path.join(wd, '%s.pp.bc' % self.filename)
@@ -303,9 +326,7 @@ class Test:
                '-entry-points=%s' % ','.join(self.entry_points),
                bc_path,
                '-o', pp_path]
-        subprocess.check_call(cmd,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
+        run_checked(cmd)
 
         # run ikos analyzer
         cmd = [find_ikos_analyzer(),
@@ -319,9 +340,7 @@ class Test:
         if 'gauge' in self.domain:
             cmd.append('-add-loop-counters')
         cmd += [pp_path, '-o', output_db]
-        subprocess.check_call(cmd,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
+        run_checked(cmd)
 
         with Database(output_db) as db:
             # Get the global result
