@@ -87,6 +87,38 @@ if __name__ == '__main__':
                   (99, 'warning'),  # !isnan(pow(q, qy)) q in [-1,1] y in [2,3]
                   ]))
 
+    # --- 4b. The same file, forced down the libm-call path -----------------
+    # Whether math.h arrives as `llvm.log.f64` or as `call @log` is decided by
+    # -fmath-errno, whose default is target-dependent: Apple/AArch64 default to
+    # -fno-math-errno (intrinsic), x86_64 Linux defaults to -fmath-errno
+    # (library call). The frontend maps both onto the same AR intrinsics, so
+    # the expectations below are IDENTICAL to the test above -- and that is the
+    # point. Without this entry a macOS developer never exercises the libm
+    # mapping and could break it silently; it is exactly how the whole FP model
+    # ended up inert on x86_64 Linux. Same file, same line checks, different
+    # compilation mode: both must agree.
+    t.add(Test('test-log-pow.c', 'log/pow via libm calls (-fmath-errno)',
+              'prover', 'error',
+              clang_flags=['-fmath-errno'],
+              line_checks=[
+                  (49, 'ok'),
+                  (50, 'ok'),
+                  (51, 'ok'),
+                  (52, 'ok'),
+                  (57, 'ok'),
+                  (58, 'error'),
+                  (64, 'ok'),
+                  (65, 'error'),
+                  (69, 'ok'),
+                  (70, 'error'),
+                  (74, 'ok'),
+                  (75, 'error'),
+                  (81, 'ok'),
+                  (85, 'warning'),
+                  (89, 'ok'),
+                  (99, 'warning'),
+                  ]))
+
     # --- 5. fpz: floating-point exception classes ------------------------
     # Opt-in checker. Pinned per-line so a checker that silently stopped finding
     # the definite cases, or started calling 0/0 a divide-by-zero, both fail.

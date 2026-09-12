@@ -281,6 +281,7 @@ class Test:
                  entry_points=None,
                  procedural=None,
                  options=None,
+                 clang_flags=None,
                  line_checks=None):
         if not isinstance(analyses, list):
             analyses = [analyses]
@@ -299,6 +300,11 @@ class Test:
         self.entry_points = entry_points or ('main',)
         self.procedural = procedural or 'inter'
         self.options = options or []
+        # Extra flags for the clang invocation only. Needed to pin how the input
+        # was compiled -- e.g. -fmath-errno forces math.h to reach the frontend
+        # as plain library calls instead of LLVM intrinsics, which is what
+        # x86_64 Linux does by default.
+        self.clang_flags = list(clang_flags or [])
         self.line_checks = line_checks or []
 
     def run(self, root, output_db):
@@ -314,6 +320,7 @@ class Test:
         cmd = [find_clang()]
         cmd += clang_emit_llvm_flags()
         cmd += clang_ikos_flags()
+        cmd += self.clang_flags
         cmd += [fullpath, '-o', bc_path]
         if self.filename.endswith('.cpp'):
             cmd.append('-std=c++17')
