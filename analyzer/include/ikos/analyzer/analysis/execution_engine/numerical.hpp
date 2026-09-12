@@ -3201,8 +3201,10 @@ private:
 
     // Same-variable comparison: `x pred x` carries exact NaN semantics that do
     // not depend on the ordered range, and the var-vs-constant refinement below
-    // cannot express them. This is what makes isnan() work -- clang lowers
-    // isnan(x) to `fcmp une x, x` (not to llvm.is.fpclass).
+    // cannot express them. This is what makes isnan() work. How isnan() gets
+    // here is platform-dependent: Darwin lowers it to `fcmp une x, x`, while
+    // glibc lowers it to `llvm.is.fpclass.f64(x, 3)` and the frontend rewrites
+    // that into `fcmp uno x, x` (see translate_intrinsic_call).
     //
     // Derived from the IEEE-754 spellings, where `u<pred>` = unordered OR pred
     // and `o<pred>` = ordered AND pred, together with the facts that x==x, x>=x

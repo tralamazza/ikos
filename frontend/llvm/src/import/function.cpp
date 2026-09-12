@@ -538,6 +538,20 @@ void FunctionImporter::translate_call(BasicBlockTranslation* bb_translation,
                               });
 }
 
+namespace {
+
+/// \brief True if an llvm.is.fpclass call's mask selects exactly "is NaN".
+///
+/// The mask is a bitmask over QNaN(bit 0), SNaN(1), -inf(2), -normal(3),
+/// -subnormal(4), -0(5), +0(6), +normal(7), +subnormal(8), +inf(9). glibc's
+/// isnan(x) passes 3 = QNaN|SNaN.
+bool is_fpclass_nan_mask(llvm::IntrinsicInst* call) {
+  auto* mask = llvm::dyn_cast< llvm::ConstantInt >(call->getArgOperand(1));
+  return mask != nullptr && mask->getZExtValue() == 3;
+}
+
+} // end anonymous namespace
+
 void FunctionImporter::translate_intrinsic_call(
     BasicBlockTranslation* bb_translation, llvm::IntrinsicInst* call) {
   ar::IntegerType* si8_ty = ar::IntegerType::si8(this->_context);
@@ -638,6 +652,32 @@ void FunctionImporter::translate_intrinsic_call(
     auto stmt = ar::VarArgCopy::create(this->_bundle, dest, src);
     stmt->set_frontend< llvm::Value >(call);
     bb_translation->add_statement(std::move(stmt));
+  } else if (call->getIntrinsicID() == llvm::Intrinsic::is_fpclass &&
+             is_fpclass_nan_mask(call)) {
+    // glibc's isnan(x) compiles to `llvm.is.fpclass.f64(x, 3)`, mask 3 being
+    // QNaN|SNaN -- any NaN. Darwin lowers the same source to a plain
+    // `fcmp uno`, which is exactly why the NaN assertions passed on macOS and
+    // failed on Linux: with no branch here the call became an opaque extern and
+    // every isnan() test stopped being decidable.
+    //
+    // AR has no fpclass intrinsic, but the analyzer already derives exact NaN
+    // knowledge from an unordered comparison of a value against itself
+    // (refine_same_var_nan in numerical.hpp), so emit `x FUNO x`.
+    //
+    // Only the NaN mask is translated. Other class masks -- infinity, zero,
+    // subnormal -- fall through to the opaque call rather than being guessed
+    // at, because a wrong class test is worse than no class test.
+    ar::Value* x = this->translate_value(bb_translation,
+                                        call->getArgOperand(0),
+                                        /*type=*/nullptr);
+
+    ar::InternalVariable* result =
+        ar::InternalVariable::create(this->_body, this->infer_type(call));
+    this->mark_variable_mapping(call, result);
+
+    auto stmt = ar::Comparison::create(ar::Comparison::FUNO, x, x);
+    stmt->set_frontend< llvm::Value >(call);
+    bb_translation->add_comparison(result, std::move(stmt));
   } else {
     this->translate_call_helper(bb_translation,
                                 call,
