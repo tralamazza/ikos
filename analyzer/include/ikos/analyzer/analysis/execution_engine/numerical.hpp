@@ -1802,9 +1802,20 @@ private:
 
     FloatingPoint lo = iv->lo;
     if (hi_d < 0.0) {
-      // Every input is negative, so every result is NaN. Top out rather than
-      // assert a definite-NaN with an empty ordered range.
-      this->_inv.normal().float_assign_nondet(ret.var());
+      // Every input is negative, so every result is NaN. Say exactly that: the
+      // definitely-NaN representation is an empty ordered range with may_nan
+      // set, which is what `Interval::point(nan)` produces, and
+      // `float_assign_interval` carries it through.
+      //
+      // Topping out here instead is why `sqrt(1.0 - x*x)` stayed unknown at
+      // x = 1.01 while the same expression at x = 2.0 -- a folded literal, so
+      // it took the constant path above -- was known-NaN. The two differ only
+      // in how the negative argument was built, and only one of them said so.
+      this->_inv.normal().float_assign_interval(
+          ret.var(),
+          core::floating_point::Interval{
+              core::floating_point::Interval::pos_inf(),
+              core::floating_point::Interval::neg_inf(), true});
       return;
     }
     if (lo_d < 0.0) {

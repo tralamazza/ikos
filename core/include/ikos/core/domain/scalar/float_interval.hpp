@@ -209,7 +209,16 @@ inline Interval interval_bin_op(char op, const Interval& x, const Interval& y) {
   bool may_nan = x.may_nan || y.may_nan;
 
   if (x.ordered_empty() || y.ordered_empty()) {
-    // No ordered values to combine; only the NaN possibility carries over.
+    // IEEE NaN propagation is exact: any arithmetic on a NaN operand yields a
+    // NaN. When one side is pinned to NaN the result is pinned to NaN too, so
+    // keep the definitely-NaN representation instead of washing it out to top.
+    // Returning top here is what lost the NaN knowledge across
+    // `sqrt(1-x*x) / (x+1.0)`: the sqrt alone was known-NaN, the division was
+    // not, so `y == y` could not be refuted.
+    if (x.is_definitely_nan() || y.is_definitely_nan()) {
+      return Interval{Interval::pos_inf(), Interval::neg_inf(), true};
+    }
+    // No ordered values to combine, and no NaN either: the state is empty.
     if (!may_nan) {
       return Interval{Interval::pos_inf(), Interval::neg_inf(), false};
     }
