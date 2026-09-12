@@ -5,6 +5,7 @@ on:
 jobs:
   build-linux:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     env:
      MAKEFLAGS: -j4
@@ -38,3 +39,51 @@ jobs:
       - name: Confirm that it runs
         run: |
           ikos --version
+
+      # The core unit-test binaries hang off a custom `build-core-tests` target
+      # and are NOT part of the default `all`. Skipping this step makes ctest
+      # report 37 tests as "Not Run" and fail the job -- verified locally.
+      - name: Build core unit tests
+        run: |
+          cd build
+          make build-core-tests
+
+      - name: Cache InterflopBench
+        id: ifb-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/interflopbench
+          key: interflopbench-examples-v1
+
+      # Tier 2 and Tier 3 of the floating-point validation run against
+      # InterflopBench. The test SKIPs (exit 77) when the checkout is absent,
+      # so without this step the suite would go green while never checking a
+      # single per-input floating-point verdict -- green by absence, which is
+      # worse than no test at all.
+      #
+      # Upstream being unreachable must not redden our CI, so a failed clone is
+      # non-fatal. It clears the directory first so a half-written checkout can
+      # never land in the cache and poison later runs.
+      - name: Fetch InterflopBench
+        if: steps.ifb-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: |
+          rm -rf "$HOME/.cache/interflopbench"
+          git clone --filter=blob:none --sparse \
+              https://github.com/interflop/InterflopBench \
+              "$HOME/.cache/interflopbench"
+          git -C "$HOME/.cache/interflopbench" sparse-checkout set examples
+
+          # Never cache a half-written checkout. If examples/ is missing the
+          # bench dir still exists, so a later run would restore a useless cache
+          # and skip Tier 2/3 forever instead of retrying. Wipe it and warn.
+          if [ ! -d "$HOME/.cache/interflopbench/examples" ]; then
+            echo "::warning::InterflopBench examples missing -- FP Tier 2/3 will skip"
+            rm -rf "$HOME/.cache/interflopbench"
+            exit 1
+          fi
+
+      - name: Run test suite
+        run: |
+          cd build
+          ctest --output-on-failure

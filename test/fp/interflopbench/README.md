@@ -335,6 +335,44 @@ It runs straight out of the build tree via the `clang` / `ikos-pp` /
 location is the `INTERFLOPBENCH_DIR` cache variable, defaulting to
 `$HOME/.cache/interflopbench/examples`.
 
+### CI wiring
+
+Both `.github/workflows/build-linux.yml` and `build-macos.yml` now run the
+suite. Three steps are load-bearing and each was verified locally, because each
+fails in a way that is easy to miss:
+
+**`make build-core-tests` is required.** The core unit-test binaries hang off a
+custom `build-core-tests` target and are **not** part of the default `all`.
+Running `ctest` after a plain `make` reports 37 tests as `***Not Run` and fails
+the job. This is the trap that would have made the first CI attempt red for a
+reason unrelated to the code.
+
+**The InterflopBench checkout must be fetched.** Tier 2 and Tier 3 need it, and
+the test SKIPs (exit 77) when it is absent. Without the fetch step the job goes
+green while never checking a single per-input floating-point verdict — green by
+absence. The fetch is cached (`actions/cache`, keyed `interflopbench-examples-*`)
+and `continue-on-error: true`, so upstream downtime cannot redden us; the skip
+then shows up explicitly as `***Skipped` in the ctest output.
+
+**A half-written checkout must never reach the cache.** If the clone succeeds but
+`sparse-checkout` fails, the bench directory exists without `examples/`. The
+test would skip, and the cache would persist that useless tree so every later
+run skips too, silently, forever. The step checks for `examples/` and wipes the
+directory with a `::warning::` if it is missing, so the next run retries.
+
+Verified locally, Debug build (asserts on, matching CI):
+
+```
+ctest                                   -> 61/61 pass, exit 0
+bench checkout hidden                   -> interflopbench ***Skipped, exit 0
+sparse-checkout failure (simulated)     -> warning + dir wiped
+```
+
+**Debug vs Release.** CI builds `-DCMAKE_BUILD_TYPE=Debug`, which leaves
+`ikos_assert` / `ikos_unreachable` live (`CMAKE_CXX_FLAGS_DEBUG=-g`, no
+`-DNDEBUG`). Both configurations were run: Debug 61/61 and Release 61/61. The
+assert-enabled path is therefore known-good rather than assumed.
+
 `SKIP_RETURN_CODE 77` is set: an absent benchmark checkout reports `Skipped`
 rather than failing, so an offline CI run stays green. Verified:
 

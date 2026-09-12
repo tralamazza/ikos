@@ -1,4 +1,7 @@
 build/
+# Out-of-tree build dirs (e.g. a Debug build alongside a Release one). Only
+# `build/` was ignored, so a second configuration showed up as untracked noise.
+build*/
 install/
 !doc/install/
 
