@@ -217,6 +217,10 @@ static llvm::cl::list< analyzer::CheckerName > Analyses(
         clEnumValN(analyzer::CheckerName::MemoryWatch,
                    checker_short_name(analyzer::CheckerName::MemoryWatch),
                    checker_long_name(analyzer::CheckerName::MemoryWatch)),
+        clEnumValN(analyzer::CheckerName::FloatPointException,
+                   checker_short_name(analyzer::CheckerName::FloatPointException),
+                   checker_long_name(
+                       analyzer::CheckerName::FloatPointException)),
         clEnumValN(analyzer::CheckerName::FloatToIntOverflow,
                    checker_short_name(analyzer::CheckerName::FloatToIntOverflow),
                    checker_long_name(

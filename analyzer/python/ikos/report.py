@@ -2048,6 +2048,38 @@ def generate_float_to_int_overflow_message(report, verbosity):
     return s
 
 
+def generate_float_point_exception_message(report, verbosity):
+    # Whether any of these actually faults depends on the FPU exception mask,
+    # which is configured at startup outside the analyzed code and is therefore
+    # invisible to the analysis. Never word a finding as an unconditional crash.
+    info = report.load_info() or {}
+    exn = info.get('exception', 'invalid-operation')
+
+    if exn == 'divide-by-zero':
+        klass = 'floating-point division by zero'
+        cond = ('traps only on a target with the floating-point divide-by-zero '
+               'exception unmasked (ARM FPSCR.DZ, x86 MXCSR.ZE)')
+    else:
+        klass = 'invalid floating-point operation'
+        cond = ('traps only on a target with the floating-point '
+               'invalid-operation exception unmasked '
+               '(ARM FPSCR.ID, x86 MXCSR.IE)')
+
+    if report.status == Result.ERROR:
+        s = klass
+    elif report.status == Result.WARNING:
+        s = klass + ' might occur'
+    else:
+        assert False, 'unexpected status'
+
+    if verbosity >= 2:
+        s += '\n' + cond
+    else:
+        s += ' (target-dependent: ' + cond + ')'
+
+    return s
+
+
 GENERATE_MESSAGE_MAP = {
     CheckKind.UNREACHABLE: generate_unreachable_message,
     CheckKind.UNEXPECTED_OPERAND: generate_unexpected_operand_message,
@@ -2098,6 +2130,7 @@ GENERATE_MESSAGE_MAP = {
     CheckKind.FUNCTION_CALL: generate_function_call_message,
     CheckKind.FREE: generate_double_free_message,
     CheckKind.FLOAT_TO_INT_OVERFLOW: generate_float_to_int_overflow_message,
+    CheckKind.FLOAT_POINT_EXCEPTION: generate_float_point_exception_message,
 }
 
 

@@ -68,6 +68,7 @@ enum class CheckerName {
   Debug,
   MemoryWatch,
   FloatToIntOverflow,
+  FloatPointException,
 };
 
 /// \brief Return the long name of the given checker
@@ -109,6 +110,8 @@ inline const char* checker_long_name(CheckerName checker) {
       return "Memory Watcher";
     case CheckerName::FloatToIntOverflow:
       return "Float To Int Overflow Analysis";
+    case CheckerName::FloatPointException:
+      return "Floating-Point Exception Analysis";
     default: {
       ikos_unreachable("unreachable");
     }
@@ -154,6 +157,8 @@ inline const char* checker_short_name(CheckerName checker) {
       return "watch";
     case CheckerName::FloatToIntOverflow:
       return "f2i";
+    case CheckerName::FloatPointException:
+      return "fpz";
     default: {
       ikos_unreachable("unreachable");
     }

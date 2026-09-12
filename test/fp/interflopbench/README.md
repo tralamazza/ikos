@@ -179,13 +179,33 @@ nan_free  modeled = {CORRECT 304, DETECTED 6, IMPRECISE 58}
 The remaining 14 misses are all opaque-libm kernels (`expm1`, `sin`/`cos`),
 which is a coverage limit, not a modelling error.
 
-### 3. `div_zero` is a hard coverage gap, confirmed not assumed
+### 3. `div_zero` was a hard coverage gap — now closed by `fpz`
 
 10 benchmarks have `div_zero` in their ground truth. Running `dbz` over all of
 them produces **zero reports**. `analyzer/src/checker/division_by_zero.cpp`
 contains no float handling at all — consistent with IEEE (a float divide-by-zero
-yields ±inf/NaN rather than trapping), but it means InterflopBench's
-`div_zero` class is entirely invisible to IKOS today.
+yields ±inf/NaN rather than trapping), but it meant InterflopBench's
+`div_zero` class was entirely invisible to IKOS.
+
+Closed by the `fpz` checker (Tier 3). Measured over all 93 benchmarks:
+
+| | count |
+|---|---|
+| div_zero ground truth | 10 |
+| `fpz` fired | **10** |
+| `fpz` silent (would be a bug) | **0** |
+| fired without div_zero ground truth | 27 |
+
+The 27 extra firings are not false positives. `metadata.json` records errors per
+*dataset input*; `fpz`'s may-tier ranges over every value the divisor could
+take. Spot-checked three and each is a genuinely unconstrained divisor: `a / b`
+(`79_division`), `sqrt(temp) / (x + 1.0)` where `x` can be −1 (`44_sqrt_neg`),
+`a/(2*b)` (`03_rump`). Different quantifier, not unsoundness.
+
+The reason the may-tier is load-bearing rather than merely noisy: **the definite
+tier contributes zero across all 93 benchmarks.** Every InterflopBench kernel
+takes nondet input, so a reachable zero divisor is always a "may", never a
+"definitely". Dropping the may-tier for tidiness would have taken recall to 0/10.
 
 ### 4. Only 16 float intrinsics are modelled; the suite uses ~20 libm calls
 
@@ -307,3 +327,42 @@ Sound outward-rounded interval images for those are hard, and the risk is
 asymmetric: a wrong `exp` image is worse than no `exp` image, because a wrong
 image is the unsoundness this harness exists to catch. Model one only when a
 specific target property needs it.
+
+**`fpz` scope -- divide-by-zero plus invalid-operation, not overflow.**
+Implemented as `FloatPointExceptionChecker` (`-a fpz`, `CheckerName::
+FloatPointException` = 18, `CheckKind::FloatPointException` = 41). Covers:
+
+* `fdiv` with a definitely-zero divisor → ZE error; possibly-zero → ZE warning
+* `0/0` → invalid-operation error, *not* divide-by-zero. Reporting the weaker
+  class would point the reader at the wrong exception bit.
+* `frem` by a definitely/possibly zero divisor → invalid (IEEE remainder is
+  undefined there, which is IO not ZE)
+* `+ - *` whose interval result is pinned to NaN → invalid (`inf - inf`,
+  `inf * 0`, NaN propagating from an upstream pinned operand)
+* `sqrt`/`log`/`log2`/`log10` of a definitely-negative operand → invalid.
+  NaN counts as negative here: `sqrt(NaN)` raises IO just as `sqrt(-1)` does,
+  so an interval pinned to NaN is a definite domain error, not an unknown one.
+
+Overflow to infinity is **not** reported. Measured on this suite it is provable
+in only 22 of 129 real cases, so an overflow checker would sit silent exactly
+when it matters and let the output read as "clean". A checker that is wrong by
+omission is worse than no checker.
+
+`log(0)` is **not** reported. C raises `FE_DIVBYZERO` for it as a library
+convention, but no hardware FP exception accompanies it -- the hardware returns
+`-inf` and carries on. Reporting it would claim a trap that cannot happen.
+
+**Enum append discipline.** `CheckKind` and `CheckerName` are persisted as raw
+integers and mirrored positionally in `enums.py`, so both new entries are
+appended last. Verified end-to-end rather than assumed: a DB written by the C++
+side reads back as checker 18 / kind 41 through the Python enums, and the
+`ikos-report` message generator resolves them.
+
+**A test that cannot fail is not a test.** Both new guards were verified
+load-bearing by deliberately breaking them: flipping a `test-fpz.c` line
+expectation makes `analysis-float` fail, and pointing the harness's
+`FPZ_CHECKER` id at a wrong value makes Tier 3 exit 1 naming each silent
+benchmark. Worth recording because the first version of the fpz test file passed
+while testing nothing -- every float result was unused, so clang's DCE deleted
+all the arithmetic and the checker never saw a single `fdiv`. The tests use a
+`volatile` sink to keep the operations alive.

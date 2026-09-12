@@ -75,6 +75,7 @@ ANALYSES = (
     'dbg',
     'watch',
     'f2i',
+    'fpz',
 )
 
 # available colors

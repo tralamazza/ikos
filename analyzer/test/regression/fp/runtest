@@ -64,8 +64,7 @@ if __name__ == '__main__':
     # returned top would leave every assertion unproven and still look clean.
     # The `error` lines are what prove the model actually says something.
     t.add(Test('test-log-pow.c', 'log/pow NaN and range', 'prover', 'error',
-              line_checks=[
-                  # NaN production from constants
+              line_checks=[                  # NaN production from constants
                   (49, 'ok'),   # isnan(log(-2.0))
                   (50, 'ok'),   # isnan(log2(-2.0))
                   (51, 'ok'),   # isnan(log10(-2.0))
@@ -86,6 +85,27 @@ if __name__ == '__main__':
                   (89, 'ok'),   # !isnan(log(p)) for p in [1,2]
                   # pow: NaN needs both operands, corners alone are not enough
                   (99, 'warning'),  # !isnan(pow(q, qy)) q in [-1,1] y in [2,3]
+                  ]))
+
+    # --- 5. fpz: floating-point exception classes ------------------------
+    # Opt-in checker. Pinned per-line so a checker that silently stopped finding
+    # the definite cases, or started calling 0/0 a divide-by-zero, both fail.
+    #
+    # Deliberately absent: lines 44 and 66-67 are guarded clear of the fault and
+    # must emit nothing, and lines 80-81 (`a - a`, `a * 0.0` under a >= 1e308)
+    # stay silent because the guard widens the operand to a range rather than
+    # pinning it to +inf, leaving only "may be NaN" -- which the checker
+    # intentionally does not report. See the note in test-fpz.c.
+    t.add(Test('test-fpz.c', 'fpz divide-by-zero and invalid ops', 'fpz',
+              'error',
+              line_checks=[
+                  (21, 'error'),    # 5.0 / a   with a == 0.0
+                  (30, 'error'),    # b / a     both zero -> invalid, not ZE
+                  (37, 'warning'),  # 1.0 / c   divisor unconstrained
+                  (53, 'error'),    # sqrt(a)   with a < 0
+                  (56, 'error'),    # log(b)    with b < -1
+                  (57, 'error'),    # log2(b)
+                  (58, 'error'),    # log10(b)
                   ]))
 
     t.run()

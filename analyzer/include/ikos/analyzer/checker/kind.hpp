@@ -171,6 +171,18 @@ enum class CheckKind {
   /// anywhere else would invalidate existing databases.
   FloatToIntOverflow,
 
+  /// \brief Check for a floating-point operation that raises a hardware FP
+  /// exception -- a divide by a definitely-zero divisor, or an operation that is
+  /// definitely invalid (`0/0`, `inf - inf`, `sqrt` of a negative).
+  ///
+  /// Only a defect where the target runs with the FP exception class unmasked,
+  /// which is why the checker is opt-in rather than part of the default set.
+  ///
+  /// Appended last: CheckKind values are persisted as raw integers in the output
+  /// database and mirrored positionally in the Python enums, so inserting
+  /// anywhere else would invalidate existing databases.
+  FloatPointException,
+
 };
 
 } // end namespace analyzer

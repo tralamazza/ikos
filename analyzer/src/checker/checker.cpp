@@ -48,6 +48,7 @@
 #include <ikos/analyzer/checker/debug.hpp>
 #include <ikos/analyzer/checker/division_by_zero.hpp>
 #include <ikos/analyzer/checker/double_free.hpp>
+#include <ikos/analyzer/checker/float_point_exception.hpp>
 #include <ikos/analyzer/checker/float_to_int_overflow.hpp>
 #include <ikos/analyzer/checker/function_call.hpp>
 #include <ikos/analyzer/checker/memory_watch.hpp>
@@ -134,6 +135,8 @@ std::unique_ptr< Checker > make_checker(Context& ctx, CheckerName name) {
       return std::make_unique< MemoryWatchChecker >(ctx);
     case CheckerName::FloatToIntOverflow:
       return std::make_unique< FloatToIntOverflowChecker >(ctx);
+    case CheckerName::FloatPointException:
+      return std::make_unique< FloatPointExceptionChecker >(ctx);
     default:
       ikos_unreachable("unreachable");
   }

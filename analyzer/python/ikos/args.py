@@ -179,6 +179,7 @@ analyses = (
     ('dbg', 'Debugger'),
     ('watch', 'Memory Watcher'),
     ('f2i', 'Float To Int Overflow Analysis'),
+    ('fpz', 'Floating-Point Exception Analysis'),
 )
 
 default_analyses = (

@@ -108,6 +108,7 @@ STATUS = {0: "ok", 1: "warning", 2: "error", 3: "unreachable"}
 # CheckerName enum order in analyzer/include/ikos/analyzer/checker/name.hpp
 F2I_CHECKER = 17   # FloatToIntOverflow
 DBZ_CHECKER = 1    # DivisionByZero
+FPZ_CHECKER = 18   # FloatPointException
 
 TIMEOUT = 180
 
@@ -455,6 +456,41 @@ def tier2(bench, tool, keep_dir=None):
 
 
 # ---------------------------------------------------------------------------
+# Tier 3: fpz recall against div_zero ground truth
+# ---------------------------------------------------------------------------
+
+def tier3(bench, tool):
+    """Run `fpz` and record whether it fires, against div_zero ground truth.
+
+    The quantifiers here do not line up, and that asymmetry is the whole point of
+    this tier. `metadata.json` lists errors per *dataset input*: which error
+    classes the benchmark's listed inputs produce. `fpz`'s may-tier ranges over
+    every value the divisor could take. So a benchmark whose listed inputs never
+    hit a zero divisor can still legitimately warn, and 27 of 93 do. That is not
+    unsoundness and is not counted against the checker.
+
+    The direction that must never regress is the other one: a benchmark that
+    really can divide by zero must not come back silent. Silence on a real
+    div_zero is a lost crash on a target that traps.
+
+    Note the definite tier contributes nothing on this suite -- all 93 benchmarks
+    take nondet input, so every reachable zero divisor is a "may", never a
+    "definitely". The may-tier is what carries recall here, which is why it is
+    kept despite the noise.
+    """
+    wd = tempfile.mkdtemp(prefix="ifb3_")
+    try:
+        shutil.copy(os.path.join(bench.path, "bench.c"), wd)
+        r = run_ikos(tool, "bench.c", ["fpz"], wd)
+        c = f2i_counts(r["db"], FPZ_CHECKER)
+        return {"bench": bench.name, "status": r["status"], "fpz": c,
+                "fired": bool(c.get("error") or c.get("warning")),
+                "truth_div_zero": "div_zero" in bench.all_errors}
+    finally:
+        shutil.rmtree(wd, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
 # Reporting
 # ---------------------------------------------------------------------------
 
@@ -467,7 +503,7 @@ def tally(results, key):
     return t
 
 
-def print_scorecard(tier1_res, tier2_res):
+def print_scorecard(tier1_res, tier2_res, tier3_res=None):
     print("=" * 72)
     print("TIER 1 -- robustness (%d benchmarks through the FP pipeline)" %
           len(tier1_res))
@@ -531,6 +567,30 @@ def print_scorecard(tier1_res, tier2_res):
         print("  %s  [all-math-modeled vs opaque-libm]: modeled=%s opaque=%s" %
               (prop, json.dumps(m, sort_keys=True), json.dumps(u, sort_keys=True)))
 
+    if not tier3_res:
+        return
+
+    print()
+    print("=" * 72)
+    print("TIER 3 -- fpz recall against div_zero ground truth (%d benchmarks)"
+          % len(tier3_res))
+    print("=" * 72)
+    dz = [r for r in tier3_res if r["truth_div_zero"]]
+    hit = [r for r in dz if r["fired"]]
+    miss = [r for r in dz if not r["fired"]]
+    print("  div_zero ground truth : %d" % len(dz))
+    print("  fpz fired           : %d" % len(hit))
+    print("  fpz SILENT (BUG)    : %d %s" % (len(miss), [r["bench"] for r in miss]))
+    extra = [r for r in tier3_res if not r["truth_div_zero"] and r["fired"]]
+    print("  fired w/o div_zero truth: %d" % len(extra))
+    print("     -> expected, not counted against the checker. The dataset inputs")
+    print("        never hit a zero divisor, but the divisor is unconstrained so")
+    print("        a zero is reachable on some input. This is the may-tier's")
+    print("        noise floor; it is also the only tier with any recall here,")
+    print("        since every benchmark input is nondet.")
+    for r in hit:
+        print("     %-32s %s" % (r["bench"], r["fpz"]))
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
@@ -544,7 +604,7 @@ def main():
     ap.add_argument("--ikos-pp", default=None, help="three-stage mode: ikos-pp")
     ap.add_argument("--ikos-analyzer", default=None,
                    help="three-stage mode: ikos-analyzer")
-    ap.add_argument("--tier", choices=["1", "2", "all"], default="all")
+    ap.add_argument("--tier", choices=["1", "2", "3", "all"], default="all")
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--report", default=None)
     ap.add_argument("--keep-drivers", default=None)
@@ -566,7 +626,7 @@ def main():
     eprint("found %d benchmarks in %s (%s mode)"
           % (len(benches), args.bench_dir, tool.mode))
 
-    t1 = t2 = []
+    t1 = t2 = t3 = []
     if args.tier in ("1", "all"):
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as ex:
             t1 = list(ex.map(lambda b: tier1(b, tool), benches))
@@ -582,13 +642,17 @@ def main():
             with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as ex:
                 t2 = list(ex.map(lambda b: tier2(b, tool), t2benches))
 
+    if args.tier in ("3", "all"):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as ex:
+            t3 = list(ex.map(lambda b: tier3(b, tool), benches))
+
     # Write the report before printing so a reporting bug cannot lose the data.
     if args.report:
         with open(args.report, "w") as f:
-            json.dump({"tier1": t1, "tier2": t2}, f, indent=1)
+            json.dump({"tier1": t1, "tier2": t2, "tier3": t3}, f, indent=1)
         eprint("report written to %s" % args.report)
 
-    print_scorecard(t1, t2)
+    print_scorecard(t1, t2, t3)
 
     unsound = sum(
         1 for b in t2 for c in b.get("cases", [])
@@ -597,7 +661,13 @@ def main():
     )
     crashed = sum(1 for r in t1
                  if r["status"] not in ("ok", "compile-error") or r["trap"])
-    return 1 if (unsound or crashed) else 0
+    # A benchmark with real div_zero ground truth that fpz went silent on.
+    fpz_missed = sum(1 for r in t3 if r["truth_div_zero"] and not r["fired"])
+    if fpz_missed:
+        for r in t3:
+            if r["truth_div_zero"] and not r["fired"]:
+                eprint("  fpz SILENT on div_zero benchmark: %s" % r["bench"])
+    return 1 if (unsound or crashed or fpz_missed) else 0
 
 
 if __name__ == "__main__":
