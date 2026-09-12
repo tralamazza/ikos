@@ -34,11 +34,11 @@ The one failure is a benchmark portability problem, not an IKOS problem:
 `33_subnormal_func1` includes `<xmmintrin.h>`, which hard-errors on arm64. It
 is classified `compile-error` and excluded from the robustness denominator.
 
-## Tier 2 — soundness and precision (62 benchmarks, 948 input vectors)
+## Tier 2 — soundness and precision (91 benchmarks, 1133 input vectors)
 
-For every benchmark with a one-argument scalar kernel, a driver is generated
-that calls the kernel with each concrete dataset vector and asserts two
-properties via `__ikos_assert`:
+For every benchmark whose kernel can be driven from its own ground-truth
+vectors, a driver is generated that calls the kernel with each concrete
+dataset vector and asserts two properties via `__ikos_assert`:
 
 | property | expression | false when |
 |---|---|---|
@@ -240,6 +240,72 @@ casts of external input:
 ```
 
 No `f2i` false positives on the other 89.
+
+### 6. Tier 2 covered only 62 of 93 — generalised to 91
+
+The original driver generator handled exactly one shape: `kernel(REAL x)`
+returning `REAL`. Everything else was skipped, so 31 benchmarks got Tier 1
+robustness only and **never had a single per-input soundness verdict**. That is
+the dangerous kind of coverage gap: the suite looked broadly green while a third
+of it was untested for the property that matters.
+
+The 31 break down as:
+
+| shape | count | now covered? |
+|---|---|---|
+| 2-arg kernel | 17 | yes |
+| 3-arg kernel | 7 | yes |
+| `int`-only input, float return | 2 | yes |
+| zero-arg, float return | 1 | yes |
+| `void` return, out-params | 3 | yes |
+| `const char*` return | 1 | no — property does not apply |
+| array param with no ground-truth values | 1 | no — would fabricate inputs |
+
+Four things the generalisation had to get right, each found by looking at real
+benchmarks rather than assuming:
+
+**Bind by name, not position.** `52_div_zero` declares `kernel(float *x, int n)`
+but orders its metadata `['n', 'x']`. A positional read binds `n` to the array
+and `x` to the count — silently wrong, and it would have produced garbage
+verdicts rather than an error. Positional is kept only as a fallback for
+benchmarks whose metadata uses generic names (`x`) against descriptive params
+(`celsius`, `angle_factor`, `principal/rate/time`), where the counts still line
+up.
+
+**Pointer array-ness hides in the type.** `double U[]` trails with `[]`, but
+`float *x` trails with the *name* and keeps the `*` inside the type. Checking
+only for a trailing `*` read six array kernels as scalars. Caught by
+categorising all 93 before writing the generator.
+
+**Out-params need `ordered_outputs` to name them.** The discriminant benchmarks
+return `void` and write answers through `float *root1, *root2`. Requiring the
+name to appear in `ordered_outputs` is what keeps `13_cancellation` out: its
+array `x` is never given values, so treating it as an out-param would have us
+assert on a value the ground truth says nothing about. Fabricating inputs and
+trusting the labels anyway is how a validator starts lying.
+
+**`0F` does not compile.** The out-param initialiser emitted `float r = 0F;`,
+which the lexer reads as octal `0` followed by a stray `F`. Needs `0.0F`.
+Caught by bulk-compiling all 91 generated drivers before running any analysis.
+
+Verification that the new paths are load-bearing rather than vacuously passing:
+
+- **Zero label changes** across all 62 previously-covered benchmarks, checked
+  per-input-vector. The generalisation is behaviour-preserving on existing
+  coverage.
+- The void/out-param path was proven in **both directions** on a synthetic
+  `void kernel(double x, double *out1, double *out2)` writing `sqrt(x)`:
+  `x=4.0` → `CORRECT` (proved), `x=-4.0` → `DETECTED` (refuted `out1==out1`).
+- Tier 2 failures now reach the exit code. They previously did not — a driver
+  that blew up was visible only in the report file and the run still exited 0.
+  Verified by forcing a bad status: exit 1.
+
+Newly-covered benchmarks produce real verdicts, including 4 new `DETECTED`
+cases (`07_heron_func1` ×2, `25_rump` ×2). Still zero unsoundness.
+
+Remaining uncovered: `13_cancellation` (no ground-truth values for its array)
+and `62_possiblenan` (returns `const char*`; NaN and finiteness are not
+properties of a string).
 
 ## What this suite cannot validate
 

@@ -130,6 +130,130 @@ KERNEL_DEF_INLINE = re.compile(
 REAL_TYPEDEF = re.compile(r"typedef\s+([A-Za-z_][A-Za-z_0-9 ]*?)\s+REAL\s*;")
 MATH_CALL = re.compile(r"\b([a-z][a-z0-9_]*)\s*\(")
 
+# The kernel lives between these pragmas in every benchmark. Anchoring on the
+# pragmas rather than on line layout is what lets a signature span lines or sit
+# next to attributes without the parse falling apart.
+KERNEL_REGION = re.compile(r"#pragma KERNEL_START(.*?)#pragma KERNEL_STOP", re.S)
+KERNEL_SIG = re.compile(
+    r"([A-Za-z_][A-Za-z_0-9 \t\*]*?)\s*\bkernel\s*\(([^)]*)\)")
+
+FLOAT_TYPES = ("float", "double", "long double")
+INT_TYPES = ("int", "long", "unsigned int", "unsigned", "short", "size_t")
+
+
+def _resolve_real(ty, real):
+    return real if ty == "REAL" else ty
+
+
+def parse_param(p):
+    """Return (base_type, name, is_array).
+
+    Array-ness sits in two places. `double U[]` trails with [], but `float *x`
+    trails with the NAME and keeps the '*' inside the type. Checking only for a
+    trailing '*' misses the pointer form, which is most of this suite -- that
+    bug read six array kernels as scalars on the first pass.
+    """
+    p = " ".join(p.split())
+    is_arr = False
+    if p.endswith("[]"):
+        is_arr, p = True, p[:-2].strip()
+    m = re.match(r"^(.*?)([A-Za-z_][A-Za-z_0-9]*)$", p)
+    if not m:
+        return (p, "?", is_arr)
+    ty, nm = m.group(1).strip(), m.group(2)
+    if "*" in ty:
+        is_arr = True
+        ty = ty.replace("*", "").strip()
+    return (ty, nm, is_arr)
+
+
+def parse_kernel_shape(src, meta):
+    """Work out how to call this benchmark's kernel and what to assert on.
+
+    Returns (shape, reason). `shape` is None when the benchmark cannot be driven
+    from its own ground-truth vectors, and `reason` says why, so every exclusion
+    is auditable instead of silent.
+
+    Binding is by NAME where possible. `52_div_zero` declares
+    `kernel(float *x, int n)` but orders its metadata as ['n', 'x'], so a
+    positional read would bind n to the array and x to the count. Positional is
+    a fallback only for benchmarks whose metadata uses generic names ('x')
+    against descriptive params ('celsius'), where the counts still line up.
+
+    A pointer param is an OUT param only when `ordered_outputs` names it.
+    Requiring that explicitly is what keeps `13_cancellation` out: its array `x`
+    is never given values, so treating it as an out-param would have us assert on
+    a value the ground truth says nothing about.
+    """
+    region = KERNEL_REGION.search(src)
+    if not region:
+        return None, "no #pragma KERNEL_START region"
+    m = KERNEL_SIG.search(region.group(1))
+    if not m:
+        return None, "no kernel() inside KERNEL_START region"
+
+    td = REAL_TYPEDEF.search(src)
+    real = td.group(1).strip() if td else None
+    raw_ret = " ".join(m.group(1).split())
+    ret = _resolve_real(raw_ret, real)
+    ret_is_float = ret in FLOAT_TYPES
+
+    raw = m.group(2).strip()
+    params = []
+    if raw and raw != "void":
+        for p in raw.split(","):
+            p = " ".join(p.split())
+            if p:
+                params.append(parse_param(p))
+
+    in_names = list(meta.get("ordered_inputs", []))
+    out_names = list(meta.get("ordered_outputs", []))
+    pnames = [p[1] for p in params]
+
+    if not params:
+        if not ret_is_float:
+            return None, "return type %r is not float/double" % (raw_ret or "<none>")
+        return {"ret": ret, "params": []}, None
+
+    if set(in_names) <= set(pnames):
+        binding = {n: n for n in in_names}
+    elif len(in_names) == len(params):
+        binding = {pnames[i]: in_names[i] for i in range(len(in_names))}
+    else:
+        return None, "inputs %s do not map onto params %s" % (in_names, pnames)
+
+    bound = []
+    for (ty, nm, is_arr) in params:
+        ty = _resolve_real(ty, real)
+        key = binding.get(nm)
+        if key is not None:
+            bound.append({"type": ty, "name": nm, "array": is_arr,
+                         "key": key, "role": "in"})
+        elif nm in out_names:
+            if not is_arr:
+                return None, "out-param %r is not a pointer" % nm
+            bound.append({"type": ty, "name": nm, "array": True,
+                         "key": None, "role": "out"})
+        else:
+            return None, ("param %r (%s) has no ground-truth source and is not "
+                         "named in ordered_outputs" % (nm, ty))
+
+    for p in bound:
+        if p["type"] not in FLOAT_TYPES and p["type"] not in INT_TYPES:
+            return None, "unsupported param type %r for %r" % (p["type"], p["name"])
+
+    # A void kernel is still checkable when it writes its answers through
+    # out-parameters named in ordered_outputs -- that is exactly what the
+    # discriminant benchmarks do. Without such a param there is nothing to
+    # assert on, so it stays excluded.
+    if not ret_is_float:
+        if ret == "void" and any(p["role"] == "out" for p in bound):
+            return {"ret": "void", "params": bound}, None
+        return None, ("return type %r is not float/double and the kernel has no "
+                     "out-parameter to assert on" % (raw_ret or "<none>"))
+
+    return {"ret": ret, "params": bound}, None
+
 
 class Bench:
     def __init__(self, name, path):
@@ -140,7 +264,12 @@ class Bench:
             self.meta = json.load(f)
         self.inputs = []  # list of (input_dict, errors)
         for ds in self.meta.get("datasets", []):
-            for inp in ds.get("inputs", []):
+            ins = ds.get("inputs", [])
+            if not ins:
+                # Zero-arg kernels carry their error classes but no vector. Keep
+                # the dataset's errors by synthesising the one vector there is.
+                ins = [{}]
+            for inp in ins:
                 self.inputs.append((inp, set(ds.get("errors", []))))
         self.math_used = sorted(
             m for m in set(MATH_CALL.findall(self.src))
@@ -152,27 +281,8 @@ class Bench:
         self.all_errors = set()
         for _, e in self.inputs:
             self.all_errors |= e
-        self.tier2 = self._tier2_signature()
+        self.tier2, self.tier2_skip_reason = parse_kernel_shape(self.src, self.meta)
 
-    def _tier2_signature(self):
-        """Return (ctype, argname) for a 1-arg scalar kernel, else None."""
-        m = KERNEL_DEF.search(self.src) or KERNEL_DEF_INLINE.search(self.src)
-        if not m:
-            return None
-        ret, raw_args = m.group(1), m.group(2)
-        args = [a.strip() for a in raw_args.split(",") if a.strip()]
-        if len(args) != 1:
-            return None
-        td = REAL_TYPEDEF.search(self.src)
-        real = td.group(1).strip() if td else None
-        resolve = {"float": "float", "double": "double", "REAL": real}
-        ctype = resolve.get(ret)
-        atype = resolve.get(args[0].split()[0])
-        if ctype not in ("float", "double") or atype not in ("float", "double"):
-            return None
-        if len(self.meta.get("ordered_inputs", [])) != 1:
-            return None
-        return ctype
 
 
 def build_tool(args, repo_root):
@@ -357,23 +467,83 @@ extern void __ikos_assert(int);
 """
 
 
+def _literal(ty, v):
+    """C literal for a ground-truth value of declared type `ty`."""
+    if ty in INT_TYPES:
+        return str(int(float(v)))
+    if ty == "float":
+        return repr(float(v)) + "F"
+    return repr(float(v))
+
+
+def _max_for(ty):
+    return FLT_MAX if ty == "float" else DBL_MAX
+
+
 def gen_driver(bench, out_path):
-    ctype = bench.tier2
-    maxv = FLT_MAX if ctype == "float" else DBL_MAX
+    """Emit one case_N() per ground-truth vector.
+
+    Each case calls the kernel with that vector and then asserts the two
+    decidable properties on every value the kernel produces. A single-arg kernel
+    has one target, the return value; a kernel with out-parameters has one per
+    out-param, so `80_discriminant` asserts on root1 and root2 separately.
+    tier2() folds the multiple lines back into one verdict per property by
+    worst-case, which is the only aggregation that keeps DETECTED honest: if any
+    output is refuted, a violation really was found.
+    """
+    shape = bench.tier2
+    ctype = shape["ret"]
     lines = DRIVER_HEAD.format(bench_c=os.path.join(bench.path, "bench.c")).split("\n")
-    plan = []  # (case_idx, input, errors, nan_line, fin_line)
+    plan = []  # (case_idx, input, errors, nan_lines, fin_lines)
     for i, (inp, errs) in enumerate(bench.inputs):
-        val = list(inp.values())[0]
-        lit = repr(float(val)) + ("F" if ctype == "float" else "")
         lines.append("void case_%d(void) {" % i)
-        lines.append("  %s y = kernel(%s);" % (ctype, lit))
-        nan_line = len(lines) + 1
-        lines.append("  __ikos_assert(y == y);")
-        fin_line = len(lines) + 1
-        lines.append("  __ikos_assert(y >= -%s && y <= %s);" % (maxv, maxv))
+        call_args = []
+        targets = []  # (var, type) to assert on
+        for p in shape["params"]:
+            v = "%s_%d" % (p["name"], i)
+            if p["role"] == "out":
+                # `0F` does not compile -- the lexer reads it as octal 0 followed
+                # by a stray 'F'. Needs a decimal point.
+                zero = "0.0F" if p["type"] == "float" else "0.0"
+                lines.append("  %s %s = %s;" % (p["type"], v, zero))
+                call_args.append("&" + v)
+                targets.append((v, p["type"]))
+                continue
+            val = inp.get(p["key"])
+            if isinstance(val, list):
+                if not val:
+                    raise ValueError("%s: empty array for param %r -- C has no "
+                                     "zero-size arrays" % (bench.name, p["name"]))
+                lines.append("  %s %s[] = { %s };"
+                            % (p["type"], v,
+                               ", ".join(_literal(p["type"], x) for x in val)))
+                call_args.append(v)
+            else:
+                if p["array"]:
+                    raise ValueError("%s: param %r is an array but the ground "
+                                     "truth gave a scalar %r"
+                                     % (bench.name, p["name"], val))
+                call_args.append(_literal(p["type"], val))
+
+        if ctype == "void":
+            lines.append("  kernel(%s);" % ", ".join(call_args))
+        else:
+            lines.append("  %s y = kernel(%s);" % (ctype, ", ".join(call_args)))
+            targets.insert(0, ("y", ctype))
+        if not targets:
+            raise ValueError("%s: nothing to assert on" % bench.name)
+
+        nan_lines, fin_lines = [], []
+        for (tn, tt) in targets:
+            mx = _max_for(tt)
+            nan_lines.append(len(lines) + 1)
+            lines.append("  __ikos_assert(%s == %s);" % (tn, tn))
+            fin_lines.append(len(lines) + 1)
+            lines.append("  __ikos_assert(%s >= -%s && %s <= %s);"
+                        % (tn, mx, tn, mx))
         lines.append("}")
         lines.append("")
-        plan.append((i, inp, errs, nan_line, fin_line))
+        plan.append((i, inp, errs, nan_lines, fin_lines))
     lines.append("int main(void) {")
     for i in range(len(bench.inputs)):
         lines.append("  case_%d();" % i)
@@ -422,7 +592,15 @@ def tier2(bench, tool, keep_dir=None):
     r = run_ikos(tool, os.path.basename(drv), ["prover"], wd)
     cases = []
     if r["status"] != "ok":
-        return {"bench": bench.name, "status": r["status"],
+        # Same classification as tier1: a driver that will not compile because the
+        # benchmark pulls in an arch-specific header is a benchmark problem, not
+        # an analyzer one. 33_subnormal_func1 includes <xmmintrin.h>, which
+        # hard-errors on arm64.
+        low = r["stderr"].lower()
+        status = ("compile-error"
+                 if ("error while compiling" in low or "errors generated" in low)
+                 else r["status"])
+        return {"bench": bench.name, "status": status,
                 "stderr": r["stderr"][-2000:], "cases": cases}
     st = line_statuses(r["db"])
 
@@ -436,9 +614,26 @@ def tier2(bench, tool, keep_dir=None):
                 return want
         return s[0]
 
-    for i, inp, errs, nan_line, fin_line in plan:
-        nan_v = at(nan_line)
-        fin_v = at(fin_line)
+    def worst(lines):
+        """Fold several output assertions into one verdict.
+
+        Worst-case, because the property is about the case as a whole: if any
+        output is refuted then a violation was found. 'missing' only wins when
+        every target was silent, otherwise it would hide a real error behind a
+        target the prover said nothing about.
+        """
+        seen = [at(l) for l in lines]
+        present = [v for v in seen if v != "missing"]
+        if not present:
+            return "missing"
+        for want in ("error", "warning", "unreachable", "ok"):
+            if want in present:
+                return want
+        return present[0]
+
+    for i, inp, errs, nan_lines, fin_lines in plan:
+        nan_v = worst(nan_lines)
+        fin_v = worst(fin_lines)
         nan_false = bool(errs & NAN_ERRORS)
         fin_false = bool(errs & INF_ERRORS)
         cases.append({
@@ -536,6 +731,13 @@ def print_scorecard(tier1_res, tier2_res, tier3_res=None):
     print("TIER 2 -- soundness / precision (%d benchmarks, %d input vectors)" %
           (len(tier2_res), sum(len(b.get("cases", [])) for b in tier2_res)))
     print("=" * 72)
+    t2_status = {}
+    for b in tier2_res:
+        t2_status[b["status"]] = t2_status.get(b["status"], 0) + 1
+    print("  driver status: %s" % json.dumps(t2_status, sort_keys=True))
+    for b in tier2_res:
+        if b["status"] not in ("ok", "compile-error"):
+            print("  !! %-28s %s" % (b["bench"], b["status"]))
     for prop in ("nan_free", "finite"):
         t = tally(tier2_res, prop)
         print("  %s:" % prop)
@@ -661,13 +863,20 @@ def main():
     )
     crashed = sum(1 for r in t1
                  if r["status"] not in ("ok", "compile-error") or r["trap"])
+    # Tier 2 now drives 91 benchmarks through generated drivers, so a crash in
+    # there has to reach the exit code too. Before this, tier2 failures were only
+    # visible in the report file -- a driver that blew up looked like a pass.
+    t2_crashed = [b for b in t2 if b["status"] not in ("ok", "compile-error")]
     # A benchmark with real div_zero ground truth that fpz went silent on.
     fpz_missed = sum(1 for r in t3 if r["truth_div_zero"] and not r["fired"])
     if fpz_missed:
         for r in t3:
             if r["truth_div_zero"] and not r["fired"]:
                 eprint("  fpz SILENT on div_zero benchmark: %s" % r["bench"])
-    return 1 if (unsound or crashed or fpz_missed) else 0
+    if t2_crashed:
+        for b in t2_crashed:
+            eprint("  tier2 FAILED (%s): %s" % (b["status"], b["bench"]))
+    return 1 if (unsound or crashed or fpz_missed or t2_crashed) else 0
 
 
 if __name__ == "__main__":
