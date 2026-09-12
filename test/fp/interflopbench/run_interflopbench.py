@@ -100,6 +100,31 @@ MODELED_MATH = {
     "round", "rint", "copysign", "fmax", "fmin", "fma", "fmuladd",
 }
 
+# libm entry points IKOS leaves as opaque extern calls.
+OPAQUE_MATH = {
+    "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "sinh", "cosh",
+    "tanh", "exp", "exp2", "expm1", "log1p", "fmod", "remainder", "tgamma",
+    "lgamma", "cbrt", "hypot",
+}
+
+
+def _with_widths(names):
+    """libm spells each function in float / double / long double flavours."""
+    out = set(names)
+    for n in names:
+        out.add(n + "f")
+        out.add(n + "l")
+    return out
+
+
+WATCHED_MATH = _with_widths(MODELED_MATH | OPAQUE_MATH)
+
+# Base op names, used to recognise the third spelling of unmodeled math: an
+# LLVM intrinsic IKOS never maps to an AR intrinsic, so it survives the whole
+# pipeline as `@llvm.cos.f64`. Neither a bare-libm-name check nor the source
+# regex sees it.
+MATH_BASES = MODELED_MATH | OPAQUE_MATH
+
 FLT_MAX = "3.4028234663852886e+38F"
 DBL_MAX = "1.7976931348623157e+308"
 
@@ -338,7 +363,7 @@ def _first_error_line(text):
     return text.strip().splitlines()[-1][:160] if text.strip() else ""
 
 
-def run_ikos(tool, source, analyses, workdir):
+def run_ikos(tool, source, analyses, workdir, trace=False):
     """Run the analysis pipeline over `source` and return the result.
 
     Two modes, depending on what `tool` was built from:
@@ -350,13 +375,18 @@ def run_ikos(tool, source, analyses, workdir):
                    build tree with no `cmake --install` step, which is what
                    ctest needs. Flag sets are imported from libruntest rather
                    than copied, so they cannot drift.
+
+    `trace=True` adds --trace-ar-stmts so the caller can read AR-level names
+    out of stdout. Costs ~20ms per benchmark.
     """
     db = os.path.join(workdir, "out.db")
     if os.path.exists(db):
         os.remove(db)
 
+    trace_flag = ["--trace-ar-stmts"] if trace else []
     if tool.mode == "wrapper":
-        cmds = [[tool.ikos, source, "-a", ",".join(analyses), "-o", db]]
+        cmds = [[tool.ikos, source, "-a", ",".join(analyses)] + trace_flag +
+                ["-o", db]]
     else:
         bc = os.path.join(workdir, "in.bc")
         pp = os.path.join(workdir, "in.pp.bc")
@@ -364,7 +394,8 @@ def run_ikos(tool, source, analyses, workdir):
             tool.clang_flags + [source, "-o", bc],
             [tool.ikos_pp, "-opt=basic", bc, "-o", pp],
             [tool.ikos_analyzer, "-a=%s" % ",".join(analyses), "-d=interval",
-             "-entry-points=main", "-proc=inter", pp, "-o=" + db],
+             "-entry-points=main", "-proc=inter"] + trace_flag +
+            [pp, "-o=" + db],
         ]
 
     out, err = "", ""
@@ -654,6 +685,88 @@ def tier2(bench, tool, keep_dir=None):
 # Tier 3: fpz recall against div_zero ground truth
 # ---------------------------------------------------------------------------
 
+AR_FLOAT_CALL = re.compile(r"call @ar\.float\.([a-z0-9]+)\.([a-z0-9]+)")
+# The dot must be in the character class: the names here are dotted
+# (`llvm.cos.f64`, `ar.float.sqrt.double`), and a class without it silently
+# matches none of them.
+RAW_CALL = re.compile(r"call @([A-Za-z_][A-Za-z0-9_.]*)\(")
+
+
+def _math_base(name):
+    """Base op name: `llvm.cos.f64` -> `cos`, `cosf` -> `cos`, `sqrt` -> `sqrt`."""
+    if name.startswith("llvm."):
+        return name[len("llvm."):].split(".")[0]
+    for suffix in ("f", "l"):
+        if name.endswith(suffix) and name[:-1] in MATH_BASES:
+            return name[:-1]
+    return name
+
+
+def trace_math(trace_text):
+    """Return (ar_float_ops, unmodeled_math) from a --trace-ar-stmts dump.
+
+    Three spellings have to be told apart, and only the first is modeled:
+
+      @ar.float.sqrt.double   modeled AR float intrinsic
+      @sqrt                   opaque libm call (glibc default on x86_64 Linux)
+      @llvm.cos.f64           LLVM intrinsic IKOS never models -- also opaque
+
+    Missing the third is how a probe can call a benchmark fully modeled while
+    the analyzer understood nothing of the math in it.
+    """
+    ar_ops = set(m.group(1) for m in AR_FLOAT_CALL.finditer(trace_text))
+    unmodeled = set()
+    for m in RAW_CALL.finditer(trace_text):
+        n = m.group(1)
+        if n.startswith("ar."):
+            continue                      # counted as modeled above
+        if _math_base(n) in MATH_BASES:
+            unmodeled.add(n)
+    return ar_ops, unmodeled
+
+
+def probe_modeled(bench, tool):
+    """Classify, from the AR trace, whether this benchmark's math calls reached
+    a modeled float intrinsic.
+
+    This replaces a regex over bench.c, which could only report what the author
+    wrote, not what IKOS understood. The importer rewrites a modeled math call to
+    an AR intrinsic named `ar.float.<op>.<width>`, so a modeled call never
+    appears under its C name. A trace still carrying `@sqrt` was not modeled.
+    That asymmetry is what makes this a real check rather than a restatement of
+    the source.
+
+    The old source-level metric is what let the x86_64-Linux gap hide: Darwin
+    lowers `sqrt` to `llvm.sqrt.f64` while glibc emits a plain `@sqrt` call, so
+    every math-using benchmark was reported "modeled" on a platform where the
+    analyzer was in fact staring at an opaque extern.
+    """
+    wd = tempfile.mkdtemp(prefix="ifbmodeled_")
+    try:
+        shutil.copy(os.path.join(bench.path, "bench.c"), wd)
+        r = run_ikos(tool, "bench.c", ["uva"], wd, trace=True)
+        if r["status"] != "ok":
+            return {"bench": bench.name, "status": r["status"],
+                    "modeled_ir": None, "opaque_ir": None, "no_math_ir": None,
+                    "ar_ops": [], "raw_math": [],
+                    "source_math": bench.math_used, "source_modeled": bench.modeled}
+        ar_ops, unmodeled = trace_math(r.get("stdout", ""))
+        has_math = bool(ar_ops or unmodeled)
+        # Per-name, not per-bench: a benchmark that mixes `sqrt` and `cos` must
+        # still be caught if its `sqrt` failed to map. Aggregating over
+        # `all(math_used in MODELED_MATH)` hides exactly that.
+        leaked = sorted(n for n in unmodeled if _math_base(n) in MODELED_MATH)
+        return {"bench": bench.name, "status": "ok",
+                "modeled_ir": has_math and not unmodeled,
+                "opaque_ir": bool(unmodeled),
+                "no_math_ir": not has_math,
+                "leaked": leaked,
+                "ar_ops": sorted(ar_ops), "raw_math": sorted(unmodeled),
+                "source_math": bench.math_used, "source_modeled": bench.modeled}
+    finally:
+        shutil.rmtree(wd, ignore_errors=True)
+
+
 def tier3(bench, tool):
     """Run `fpz` and record whether it fires, against div_zero ground truth.
 
@@ -698,7 +811,8 @@ def tally(results, key):
     return t
 
 
-def print_scorecard(tier1_res, tier2_res, tier3_res=None):
+def print_scorecard(tier1_res, tier2_res, tier3_res=None, probes=None):
+    probes = probes or []
     print("=" * 72)
     print("TIER 1 -- robustness (%d benchmarks through the FP pipeline)" %
           len(tier1_res))
@@ -762,12 +876,50 @@ def print_scorecard(tier1_res, tier2_res, tier3_res=None):
     else:
         print("  No unsound results.")
 
-    # Split precision by whether every math call is modeled.
+    # Split precision by whether the math actually reached a modeled AR float
+    # intrinsic, as observed in the trace. The old split used a regex over the C
+    # source, which reported author intent rather than analyzer capability.
+    ir = {p["bench"]: p for p in probes}
+
+    def in_bucket(b, kind):
+        return bool(ir.get(b["bench"], {}).get(kind))
+
     for prop in ("nan_free", "finite"):
-        m = tally([b for b in tier2_res if b.get("modeled")], prop)
-        u = tally([b for b in tier2_res if not b.get("modeled")], prop)
-        print("  %s  [all-math-modeled vs opaque-libm]: modeled=%s opaque=%s" %
-              (prop, json.dumps(m, sort_keys=True), json.dumps(u, sort_keys=True)))
+        m = tally([b for b in tier2_res if in_bucket(b, "modeled_ir")], prop)
+        u = tally([b for b in tier2_res if in_bucket(b, "opaque_ir")], prop)
+        n = tally([b for b in tier2_res if in_bucket(b, "no_math_ir")], prop)
+        print("  %s  [IR-verified] modeled   = %s" % (prop, json.dumps(m, sort_keys=True)))
+        print("  %s  [IR-verified] opaque    = %s" % (prop, json.dumps(u, sort_keys=True)))
+        print("  %s  [IR-verified] no-libm   = %s" % (prop, json.dumps(n, sort_keys=True)))
+
+    if probes:
+        print()
+        print("  modelling probe (AR trace, not source regex):")
+        ok = [p for p in probes if p["status"] == "ok"]
+        bad = [p for p in probes if p["status"] != "ok"]
+        print("    probed=%d  fully-modeled=%d  opaque=%d  no-libm=%d  probe-failed=%d"
+              % (len(ok),
+                 sum(1 for p in ok if p["modeled_ir"]),
+                 sum(1 for p in ok if p["opaque_ir"]),
+                 sum(1 for p in ok if p["no_math_ir"]),
+                 len(bad)))
+        # The interesting set: a call whose name IKOS is supposed to model came
+        # back opaque. This is exactly the class of platform/frontend gap the old
+        # source regex could not see -- it is how the whole FP model sat inert on
+        # x86_64 Linux while every benchmark still read "modeled".
+        lied = [p for p in ok if p["leaked"]]
+        if lied:
+            print("    names IKOS should model but the call stayed OPAQUE: %d" % len(lied))
+            for p in lied[:20]:
+                print("      %-32s leaked=%s ar_ops=%s"
+                      % (p["bench"], p["leaked"], p["ar_ops"]))
+            if len(lied) > 20:
+                print("      ... %d more" % (len(lied) - 20))
+        else:
+            print("    every should-be-modeled call reached an AR float intrinsic.")
+        if bad:
+            print("    probe failures: %s"
+                  % [(p["bench"], p["status"]) for p in bad[:10]])
 
     if not tier3_res:
         return
@@ -838,7 +990,7 @@ def main():
         if args.keep_drivers:
             os.makedirs(args.keep_drivers, exist_ok=True)
             t2 = [tier2(b, tool,
-                       keep_dir=os.path.join(args.keep_drivers, b["name"]))
+                       keep_dir=os.path.join(args.keep_drivers, b.name))
                   for b in t2benches]
         else:
             with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as ex:
@@ -848,13 +1000,20 @@ def main():
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as ex:
             t3 = list(ex.map(lambda b: tier3(b, tool), benches))
 
+    # The modelling probe runs over every benchmark regardless of tier: whether
+    # the frontend turned a math call into a modeled AR intrinsic is a property
+    # of the importer, not of any one tier.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as ex:
+        probes = list(ex.map(lambda b: probe_modeled(b, tool), benches))
+
     # Write the report before printing so a reporting bug cannot lose the data.
     if args.report:
         with open(args.report, "w") as f:
-            json.dump({"tier1": t1, "tier2": t2, "tier3": t3}, f, indent=1)
+            json.dump({"tier1": t1, "tier2": t2, "tier3": t3, "probes": probes},
+                      f, indent=1)
         eprint("report written to %s" % args.report)
 
-    print_scorecard(t1, t2, t3)
+    print_scorecard(t1, t2, t3, probes)
 
     unsound = sum(
         1 for b in t2 for c in b.get("cases", [])
@@ -873,10 +1032,21 @@ def main():
         for r in t3:
             if r["truth_div_zero"] and not r["fired"]:
                 eprint("  fpz SILENT on div_zero benchmark: %s" % r["bench"])
+    # A call whose name IKOS is supposed to model, but which the AR trace shows
+    # stayed an opaque extern. Zero on macOS and on Linux with the libm mapping;
+    # non-zero means that mapping regressed. This is the guard that was missing
+    # when the FP model was silently inert on x86_64 Linux.
+    modelling_leaks = [(p["bench"], p["leaked"]) for p in probes
+                       if p.get("leaked")]
+    if modelling_leaks:
+        for b, leaked in modelling_leaks[:10]:
+            eprint("  MODELLING REGRESSION: %s should be modeled but stayed "
+                   "opaque: %s" % (b, leaked))
     if t2_crashed:
         for b in t2_crashed:
             eprint("  tier2 FAILED (%s): %s" % (b["status"], b["bench"]))
-    return 1 if (unsound or crashed or fpz_missed or t2_crashed) else 0
+    return 1 if (unsound or crashed or fpz_missed or t2_crashed
+                or modelling_leaks) else 0
 
 
 if __name__ == "__main__":

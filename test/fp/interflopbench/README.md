@@ -213,19 +213,86 @@ Modelled (`frontend/llvm/src/import/bundle.cpp`): `sqrt, log, log2, log10,
 pow, fabs, floor, ceil, trunc, round, rint, copysign, maxnum, minnum, fma,
 fmuladd`.
 
-Opaque extern calls used by the suite: `sin, cos, tan, asin, acos, tanh, sinh,
-cosh, exp, expm1, log1p, fmod, tgamma`. Each one makes the result top, which
-is why 581 of 948 `nan_free` cases are `IMPRECISE` rather than provable. The
-harness tags every benchmark `modeled` / `opaque` so the two populations are
-never conflated:
+Opaque: `sin, cos, tan, asin, acos, tanh, sinh, cosh, exp, expm1, log1p,
+fmod, tgamma`. Each one makes the result top.
+
+#### A math call has three spellings, and only one is modelled
+
+Read `--trace-ar-stmts` and every math call turns out to be one of:
+
+| trace | meaning |
+|---|---|
+| `@ar.float.sqrt.double` | modelled AR float intrinsic |
+| `@sqrt` | opaque libm call |
+| `@llvm.cos.f64` | LLVM intrinsic IKOS never maps -- **also opaque** |
+
+The third is the trap. It looks like an intrinsic, so it reads as "handled", but
+IKOS has no transfer function for it and the result is top.
+
+#### The platform split this hid
+
+Whether a math call even *arrives* as an intrinsic is target-dependent:
+
+| target | `log(x)` compiles to |
+|---|---|
+| `arm64-apple-darwin` | `llvm.log.f64` |
+| `x86_64-apple-darwin` | `llvm.log.f64` |
+| `x86_64-unknown-linux-gnu` | `@log` (plain glibc call) |
+| `x86_64-unknown-linux-gnu -fno-math-errno` | `llvm.log.f64` |
+
+x86_64 Linux defaults to `-fmath-errno`, so glibc's `math.h` lowers to ordinary
+library calls. IKOS keys off `ar::Intrinsic::Float*`, which only arrives via the
+LLVM intrinsic, so on Linux the whole FP model was inert -- every modelled
+function was an opaque extern. Fixed by mapping libm names onto the AR intrinsics
+in the importer (`translate_libm_intrinsic`).
+
+#### Why the old `modeled` tag could not see any of this
+
+It was a regex over `bench.c`:
+
+```python
+self.math_used = sorted(m for m in set(MATH_CALL.findall(self.src)) ...)
+self.modeled = all(m in MODELED_MATH for m in self.math_used)
+```
+
+That reports what the author wrote, not what IKOS understood. Every `sqrt` read
+as "modelled" on a platform where the analyzer was looking at `@log`. It also
+counted a benchmark with *no* math as modelled, since `all([])` is true.
+
+The probe now reads the AR trace instead, and splits into three buckets so the
+vacuous case is visible rather than folded into "modelled":
 
 ```
-nan_free  modeled = {CORRECT 304, DETECTED 5, MISSED 1, IMPRECISE 58}
-nan_free  opaque  = {CORRECT 43,  MISSED 14,  IMPRECISE 523}
+probed=92  fully-modeled=27  opaque=40  no-libm=25  probe-failed=1
+every should-be-modeled call reached an AR float intrinsic.
+
+nan_free  modeled = {CORRECT 298, DETECTED 8, IMPRECISE 32, MISSED 3}
+nan_free  opaque  = {IMPRECISE 514, MISSED 37}
+nan_free  no-libm = {CORRECT 121, IMPRECISE 111, MISSED 9}
 ```
 
-The `modeled` column is where IKOS is actually being tested. The `opaque`
-column measures how much of the suite IKOS cannot see at all.
+The split is now sharp in a way it was not before: **every** `CORRECT` and
+`DETECTED` result lives in the modelled bucket; the opaque bucket has none.
+That is an IR-grounded demonstration that the modelling, not luck, is what
+produces the precision.
+
+#### The guard
+
+Any call whose name IKOS is supposed to model but which the trace shows stayed
+opaque fails the suite:
+
+```
+MODELLING REGRESSION: 11_cosine_func1 should be modeled but stayed opaque: ['llvm.cos.f64']
+```
+
+This is per-name, not per-bench, so a benchmark mixing `sqrt` and `cos` still
+gets caught on its `sqrt`. Verified load-bearing by adding `cos` to
+`MODELED_MATH`: the guard fired on every cosine benchmark, catching
+`llvm.cos.f32` as well as `llvm.cos.f64`, and the run exited 1.
+
+The DB cannot be used for this. It stores LLVM-level names only (`llvm.sqrt.f64`
+on Darwin, `sqrt` on Linux) and `strings` finds no `ar.float` anywhere in it, so
+it can report the platform split but not whether the call was modelled.
 
 ### 5. `f2i` fires correctly and only where it should
 
