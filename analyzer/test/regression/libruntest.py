@@ -451,7 +451,12 @@ class TestManager:
                 # Clear everything down the cursor
                 printf('\033[J')
 
-            if VERBOSE:
+            # A failure must never be silent. VERBOSE additionally dumps the
+            # comments on passing tests (PASS_IMPROVE notes, the exact command).
+            # Under ctest nothing passes -v, so gating all comments on VERBOSE
+            # meant a Linux-only line_checks failure reported bare "Failed" with
+            # the actual "Got status X for line N" reason thrown away.
+            if VERBOSE or result.code == 'FAIL':
                 for line in result.comments:
                     printf('    %s\n' % line)
 
